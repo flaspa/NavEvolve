@@ -4,6 +4,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pymongo[srv]>=4.8
 python-dotenv>=1.0
+google-genai>=2.29   # Gemini perception (perception.py)
 # tests
 pytest>=8
 httpx>=0.27

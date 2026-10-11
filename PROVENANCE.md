@@ -75,3 +75,12 @@ Observation reset controls:
   total counts.
 - `DELETE /observations`: deletes documents in `observations` only, for one
   scene or all. Local development only, and protected by a confirmed-count check.
+
+Milestone 3 — Gemini perception:
+- `brain/perception.py`: for one stored observation, a Gemini 3.8 Flash
+  structured description (visible evidence only), then separate 768-d image
+  and text embeddings from Gemini Embedding 2. Results are written onto the
+  same observation with model ids, status, token usage and per-stage
+  `time.perf_counter()` latency. Idempotent, and leaves the JPEG, pose, camera
+  and range fields untouched.
+- `brain/db.py`: the gallery list omits the embedding vectors.

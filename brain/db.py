@@ -92,6 +92,8 @@ def _public(doc: dict) -> dict:
     doc = dict(doc)
     doc["id"] = str(doc.pop("_id"))
     doc.pop("image_jpeg", None)
+    doc.pop("image_embedding", None)
+    doc.pop("text_embedding", None)
     if isinstance(doc.get("stored_at"), datetime):
         doc["stored_at"] = doc["stored_at"].isoformat()
     return doc
@@ -117,7 +119,9 @@ def delete_observations(scene_id: str | None = None) -> int:
 
 def list_observations(scene_id: str | None = None, limit: int = 20) -> list[dict]:
     query = {"scene_id": scene_id} if scene_id else {}
-    cursor = get_db()[OBSERVATIONS].find(query, {"image_jpeg": 0}).sort("stored_at", DESCENDING).limit(limit)
+    # Embedding vectors stay in MongoDB; the gallery list does not need them.
+    hidden = {"image_jpeg": 0, "image_embedding": 0, "text_embedding": 0}
+    cursor = get_db()[OBSERVATIONS].find(query, hidden).sort("stored_at", DESCENDING).limit(limit)
     return [_public(d) for d in cursor]
 
 

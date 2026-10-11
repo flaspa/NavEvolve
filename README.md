@@ -13,7 +13,7 @@ reused and what is new.
 | Component | Role | Status |
 |---|---|---|
 | **Body** (`body/`) | 3D world (Three.js + Spark splats), human avatar, NavMesh-constrained WASD locomotion, minimap, egocentric frame capture (`frameCapture.js`) | ✅ working (reused) |
-| **Perception** | ego JPEG + pose + camera + Gaussian-splat centre range → MongoDB `observations` · embeddings next | capture ✅ |
+| **Perception** (`brain/perception.py`) | ego JPEG + pose + camera + Gaussian-splat centre range → MongoDB `observations`; Gemini 3.8 Flash structured description + separate 768-d image and text embeddings (Gemini Embedding 2) on the same document | capture ✅ · enrichment ✅ (1 observation so far) |
 | **Memory** (`brain/db.py`) | persistent graph of places in MongoDB Atlas | connection ✅ · graph next |
 | **Harness** | automatic improvement of the place-recognition policy | next milestone |
 
@@ -61,6 +61,13 @@ Scene data is read from `C:/Flavia/Data/seekr-world-habitat-gs-validation`
 MongoDB credentials live only in `brain/.env` (gitignored). The browser shows
 Brain/MongoDB status by calling `/health` and `/db/health`; it never sees the
 connection string.
+
+**Gemini perception** (runs on its own, separate from the server):
+
+```bash
+cd brain
+.venv/Scripts/python perception.py --id <observation_id>   # or no --id: oldest un-enriched
+```
 
 ## Controls
 
