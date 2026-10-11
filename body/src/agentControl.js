@@ -12,6 +12,7 @@ import { buildGrid, astar, smooth, snapCell, cellOf, cellCentre, isWalk, CELL } 
 const VIEW_RANGE_M = 3;
 const STALL_S = 1.5; // no progress for this long => "blocked"
 const GOTO_TIMEOUT_S = 60;
+const TURN_DEG_PER_S = 240; // visible rotation speed for turn/face and corners while walking
 // Background tabs get no animation frames, so waiting would hang until the brain times out.
 const nextFrame = () => document.hidden
   ? Promise.reject(new Error("tab is in the background — bring the NavEvolve tab to the front"))
@@ -45,6 +46,28 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
   }
 
   const setHeading = (deg) => player.setAgentPose({ rotation: headingDegToQuaternion(deg) });
+  const wrap = (d) => ((d % 360) + 540) % 360 - 180; // -> [-180, 180)
+
+  /** Move the heading toward target by at most maxStep degrees; returns the remaining difference. */
+  function slewHeading(target, maxStep) {
+    const cur = pose().headingDeg, diff = wrap(target - cur);
+    setHeading(cur + Math.sign(diff) * Math.min(Math.abs(diff), maxStep));
+    return Math.abs(diff) - Math.min(Math.abs(diff), maxStep);
+  }
+
+  /** Rotate visibly by deg (+ = left) over frames, ending exactly on the target. */
+  async function rotateBy(deg) {
+    const target = pose().headingDeg + deg;
+    let last = performance.now(), left = Infinity;
+    while (left > 0.01) {
+      await nextFrame();
+      const now = performance.now();
+      left = slewHeading(target, TURN_DEG_PER_S * Math.min((now - last) / 1000, 0.1));
+      last = now;
+    }
+    setHeading(target);
+    await nextFrame();
+  }
 
   function markVisited(x, z, headingDeg, fovDeg, aspect) {
     if (!ensureGrid()) return;
@@ -111,7 +134,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
         [wx, wz] = job.path[job.idx];
         d = Math.hypot(wx - p.x, wz - p.z);
       }
-      setHeading(THREE.MathUtils.radToDeg(Math.atan2(wx - p.x, wz - p.z)));
+      slewHeading(THREE.MathUtils.radToDeg(Math.atan2(wx - p.x, wz - p.z)), TURN_DEG_PER_S * delta);
       player.setExternalMove(wx - p.x, wz - p.z);
     },
 
@@ -133,15 +156,13 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
     async pose() { return { pose: pose() }; },
 
     async turn({ deg }) {
-      setHeading(pose().headingDeg + deg);
-      await nextFrame();
+      await rotateBy(deg);
       return { pose: pose() };
     },
 
     async face({ x, z }) {
       const p = pose();
-      setHeading(THREE.MathUtils.radToDeg(Math.atan2(x - p.x, z - p.z)));
-      await nextFrame();
+      await rotateBy(wrap(THREE.MathUtils.radToDeg(Math.atan2(x - p.x, z - p.z)) - p.headingDeg));
       return { pose: pose() };
     },
 
