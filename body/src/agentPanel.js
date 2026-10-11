@@ -16,7 +16,7 @@ export function createAgentPanel({ ui, minimap }) {
     window.__seekr.agent?.halt(); // the brain's old task is cancelled, but a walk it started would keep going
     fn(msg);
   };
-  const go = () => input.value.trim() && send({ event: "goal", text: input.value.trim() });
+  const go = () => input.value.trim() && send({ event: "goal", text: input.value.trim(), sceneId: window.__seekr?.scene?.id });
   box.querySelector("[data-go]").onclick = go;
   box.querySelector("[data-stop]").onclick = () => send({ event: "stop" });
   input.addEventListener("keydown", (e) => {

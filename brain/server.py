@@ -327,7 +327,7 @@ try:
             if ev.get("event") == "goal":
                 task and task.cancel()
                 body = await agent_ws.get_body()
-                task = asyncio.create_task(agent.find(body, agent_ws.scene_id or "interior_0759_839979", ev["text"]))
+                task = asyncio.create_task(agent.find(body, ev.get("sceneId") or agent_ws.scene_id or "interior_0759_839979", ev["text"]))
                 task.add_done_callback(lambda t, b=body: _report(t, b))
             elif ev.get("event") == "stop" and task:
                 task.cancel()

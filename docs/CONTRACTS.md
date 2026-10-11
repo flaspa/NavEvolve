@@ -12,7 +12,7 @@ Browser = client (`body/src/agentLink.js`), connects on load, reconnects every 2
 
 Brain → browser: `{"id": "<uuid>", "cmd": "<name>", ...args}`
 Browser → brain reply: `{"id": "<same>", "ok": true, "result": {...}}` or `{"id", "ok": false, "error": "msg"}`
-Browser → brain events (no id): `{"event": "hello", "sceneId"}`, `{"event": "goal", "text"}`, `{"event": "stop"}`
+Browser → brain events (no id): `{"event": "hello", "sceneId"}`, `{"event": "goal", "text", "sceneId"}` (scene loaded when the goal was typed), `{"event": "stop"}`
 
 | cmd | args | result |
 |---|---|---|
