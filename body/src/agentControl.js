@@ -1,5 +1,3 @@
-// REUSED from teammate Jun Jiang's NavEvolve branch (flaspa/NavEvolve PR #1, commit 5a8b689), verbatim.
-
 /**
  * agentControl.js — the browser half of the brain's Body: capture / goto / turn /
  * face / pose / frontiers / reset (docs/CONTRACTS.md §1). Walking is driven by
