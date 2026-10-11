@@ -1,0 +1,39 @@
+# Secrets — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local datasets / scene assets (served from disk, never committed)
+data/
+local-worlds/
+*.ply
+*.spz
+*.splat
+*.ksplat
+*.navmesh
+
+# Node / Vite
+node_modules/
+dist/
+.vite/
+vite.config.js.timestamp-*
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Editor / OS / agent state
+.DS_Store
+Thumbs.db
+.vscode/
+.claude/
+.agents/
+
+# Legacy Seekr brain cache
+brain/.memories_collection

@@ -1,0 +1,10 @@
+# Seekr Brain — perception milestone.
+# The `vlmserver` Conda env already provides torch 2.13 (CUDA 12.9) and
+# transformers 5.16; do NOT reinstall those. These are the only extras needed.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pillow>=10
+transformers>=5.0
+torch>=2.5
+requests>=2.31
+python-dotenv>=1.0

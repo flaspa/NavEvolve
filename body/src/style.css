@@ -1,0 +1,1596 @@
+/* Global reset for a fullscreen WebGL canvas */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  background: #0e0e12;
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+#app canvas {
+  display: block;
+}
+
+/* ---------- top-left HUD ---------- */
+#hud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  pointer-events: none;
+  color: #e8e8ee;
+  /* Transform, not display:none — the panel keeps its layout and its DOM, so
+     collapsing animates and disturbs nothing inside it. Both roots are fixed,
+     so neither slide can resize the canvas or change the camera aspect. */
+  transition: transform 220ms ease;
+  will-change: transform;
+}
+
+/* Off to the left by the panel's own width plus its 12px inset, which leaves
+   the absolutely-positioned tab sitting just inside the screen edge. The tab
+   does not contribute to #hud's width, so -100% is exactly the panel. */
+#hud.collapsed {
+  transform: translateX(calc(-100% - 12px));
+}
+
+.hud-panel {
+  background: rgba(14, 14, 18, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  /* 360: 320 wrapped "around" onto its own line and 336 was still short.
+     Font size, family, line height and UI scale are all untouched — the only
+     thing that moved is how much room the sentence has. */
+  max-width: 360px;
+}
+
+.hud-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
+
+/* Active scene name. Not uppercased — unlike .hud-title it shows a
+   user-supplied filename, which must read verbatim. */
+.hud-scene {
+  font-size: 12px;
+  margin-top: 4px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Brain connection state — its own line so Explorer/view status cannot
+   overwrite it. Distinct colour from .hud-status to read as a separate
+   concern at a glance. */
+.hud-brain {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #e0c48a;
+}
+
+.hud-status {
+  font-size: 13px;
+  margin-top: 4px;
+  color: #9fe8b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-pos {
+  font-size: 12px;
+  margin-top: 2px;
+  color: #8ab8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Active-camera read-out — distinct from Seekr's own floorplan position. */
+.hud-cam {
+  color: #b8a6e0;
+}
+
+.hud-help {
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 8px;
+  opacity: 0.75;
+}
+
+.hud-view {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  pointer-events: auto;
+}
+
+.hud-view button {
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.hud-view button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.hud-view button.active {
+  background: rgba(120, 180, 255, 0.25);
+  border-color: rgba(120, 180, 255, 0.6);
+}
+
+/* ---------- collapse tabs ----------
+   One small handle per panel, in the same dark translucent language as the
+   panels themselves. Absolutely positioned just OUTSIDE its panel's edge, so
+   it rides along with the slide and stays reachable when the panel is gone. */
+.edge-toggle {
+  position: absolute;
+  /* Near the top rather than mid-edge, so the handles sit out of the way of
+     the scene. Offset from each panel's own box — both roots start at
+     top: 12px, so the two tabs land at the same height as each other. */
+  top: 90px;
+  width: 20px;
+  height: 44px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #b9b9c4;
+  background: rgba(14, 14, 18, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+  /* #hud sets pointer-events: none for click-through to the scene; the tab
+     has to opt back in, exactly as .hud-view does. */
+  pointer-events: auto;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.edge-toggle:hover {
+  background: rgba(40, 40, 50, 0.85);
+  color: #e8e8ee;
+}
+
+.edge-toggle-left {
+  left: 100%;
+  margin-left: 6px;
+}
+
+.edge-toggle-right {
+  right: 100%;
+  margin-right: 6px;
+}
+
+/* ---------- right sidebar ---------- */
+#sidebar {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  /* 300: "Traversability violations" is the longest label in the result
+     column, and this is the last few pixels it needs. Everything else in the
+     sidebar simply follows the container. */
+  width: 300px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: #e8e8ee;
+  transition: transform 220ms ease;
+  will-change: transform;
+}
+
+/* Mirror of the HUD rule: off to the right by its own width plus the inset. */
+#sidebar.collapsed {
+  transform: translateX(calc(100% + 12px));
+}
+
+/* minimap */
+#minimap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#minimap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.minimap-label {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  opacity: 0.55;
+}
+
+/* tabbed panel */
+.panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 18, 0.65);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.panel-tabs {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.panel-tabs button {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  color: #b9b9c4;
+  background: transparent;
+  border: none;
+  padding: 9px 0;
+  cursor: pointer;
+}
+
+.panel-tabs button.active {
+  color: #fff;
+  background: rgba(120, 180, 255, 0.12);
+  box-shadow: inset 0 -2px 0 rgba(120, 180, 255, 0.7);
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-body.hidden {
+  display: none;
+}
+
+/* controls tab */
+.ctl-section {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin: 12px 0 6px;
+}
+
+.ctl-section:first-child {
+  margin-top: 0;
+}
+
+.ctl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+.ctl-label {
+  width: 64px;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.ctl-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #78b4ff;
+}
+
+.ctl-value {
+  width: 44px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.ctl-check {
+  cursor: pointer;
+}
+
+.ctl-check input {
+  accent-color: #78b4ff;
+}
+
+.ctl-check .ctl-label {
+  width: auto;
+}
+
+/* static caption under a section heading */
+.ctl-note {
+  font-size: 11px;
+  line-height: 1.35;
+  opacity: 0.6;
+  margin: 2px 0 6px;
+}
+
+/* calibration values that can be double-clicked and typed into */
+.ctl-value-editable {
+  cursor: text;
+}
+
+.ctl-value.editing {
+  width: 64px; /* only while editing — a typed "-0.15" needs the room */
+}
+
+.ctl-value-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11px;
+  text-align: right;
+  color: #e8e8ee;
+  background: rgba(120, 180, 255, 0.12);
+  border: 1px solid rgba(120, 180, 255, 0.65);
+  border-radius: 3px;
+  padding: 0 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctl-value-input:focus {
+  outline: none;
+  border-color: #78b4ff;
+}
+
+/* read-only text row (e.g. active world-asset filenames) */
+.ctl-readout .ctl-value {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctl-button {
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(120, 180, 255, 0.18);
+  border: 1px solid rgba(120, 180, 255, 0.45);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 6px 0 2px;
+  cursor: pointer;
+}
+
+.ctl-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ctl-button:disabled:hover {
+  background: rgba(120, 180, 255, 0.18);
+}
+
+/* label-above-control dropdown row */
+.ctl-select-row {
+  margin: 6px 0 2px;
+}
+
+.ctl-select-label {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-bottom: 3px;
+}
+
+.ctl-select {
+  /* The opened option list is painted by the OS, not by this stylesheet.
+     color-scheme tells the platform to draw it dark, which is what fixes the
+     white popup; the option rule below covers engines that honour it. */
+  color-scheme: dark;
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(120, 180, 255, 0.12);
+  border: 1px solid rgba(120, 180, 255, 0.45);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.ctl-select:focus {
+  outline: none;
+  border-color: #78b4ff;
+}
+
+.ctl-select option {
+  background: #16161c;
+  color: #e8e8ee;
+}
+
+.ctl-button:hover {
+  background: rgba(120, 180, 255, 0.3);
+}
+
+/* chat tab */
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.chat-line {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin-top: 4px;
+  overflow-wrap: break-word;
+}
+
+.chat-line b {
+  color: #9fe8b8;
+  margin-right: 6px;
+}
+
+/* Evaluator is a VERDICT about a run, not the agent speaking, so it must not
+   read as Explorer's voice. Amber from the existing HUD palette (.hud-brain),
+   the furthest hue from Explorer's green while staying in theme. Explorer's
+   colour above is deliberately unchanged. */
+.chat-line.chat-evaluator b {
+  color: #e0c48a;
+}
+
+.chat-row {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chat-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  color: #e8e8ee;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 7px 10px;
+  outline: none;
+}
+
+.chat-row input:focus {
+  border-color: rgba(120, 180, 255, 0.6);
+}
+
+.chat-row button {
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(120, 180, 255, 0.25);
+  border: 1px solid rgba(120, 180, 255, 0.5);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+
+/* ---------- Explorer capture gallery ---------- */
+
+.capture-gallery-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(5, 5, 8, 0.88);
+  backdrop-filter: blur(8px);
+  box-sizing: border-box;
+}
+
+.capture-gallery {
+  width: min(1100px, 100%);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #e8e8ee;
+  background: rgba(18, 18, 24, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
+}
+
+.capture-gallery-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.capture-gallery-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.capture-gallery-close {
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.capture-gallery-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.capture-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.capture-card {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+}
+
+.capture-card-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #000;
+}
+
+.capture-card-meta {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #b9b9c4;
+  font-variant-numeric: tabular-nums;
+}
+
+.capture-gallery-empty {
+  grid-column: 1 / -1;
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: #b9b9c4;
+}
+
+/* ---------- Objects tab ---------- */
+
+.obj-empty {
+  padding: 24px 8px;
+  font-size: 12px;
+  color: #7a7a8a;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.obj-clear-row {
+  margin-bottom: 8px;
+}
+
+.obj-clear-btn {
+  width: 100%;
+  text-align: center;
+}
+
+/* Object card */
+.obj-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.obj-card--visible {
+  background: rgba(80, 200, 140, 0.06);
+  border-color: rgba(80, 200, 140, 0.22);
+}
+
+/* Card header */
+.obj-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.obj-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8ee;
+  flex-shrink: 0;
+}
+
+.obj-conf {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #8ab8f0;
+  flex-shrink: 0;
+}
+
+.obj-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.obj-badge--visible {
+  background: rgba(80, 200, 140, 0.22);
+  color: #9fe8b8;
+}
+
+.obj-badge--history {
+  background: rgba(255, 255, 255, 0.08);
+  color: #7a7a8a;
+}
+
+/* Attributes */
+.obj-attrs {
+  font-size: 11px;
+  color: #b9b9c4;
+  margin-bottom: 5px;
+  line-height: 1.5;
+}
+
+/* Metadata rows */
+.obj-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.obj-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 11px;
+  color: #7a7a8a;
+}
+
+.obj-meta-row > span:first-child {
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.obj-meta-row > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #b9b9c4;
+  word-break: break-all;
+}
+
+/* Bounding-box collapsible */
+.obj-bbox-details {
+  margin-top: 4px;
+}
+
+.obj-bbox-details summary {
+  font-size: 10px;
+  color: #5a5a6a;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.obj-bbox-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.obj-bbox-details summary::before {
+  content: "▶ ";
+  font-size: 8px;
+}
+
+.obj-bbox-details[open] summary::before {
+  content: "▼ ";
+}
+
+.obj-bbox-coords {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  color: #7a7a8a;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+/* Chat tools: secondary controls above the log (Copy chat, Clear chat).
+   Both buttons share .chat-copy so they stay visually identical. */
+.chat-tools {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.chat-tools .chat-copy {
+  font: inherit;
+  font-size: 11px;
+  color: rgba(232, 232, 238, 0.75);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.chat-tools .chat-copy:hover {
+  border-color: rgba(120, 180, 255, 0.6);
+  color: #e8e8ee;
+}
+
+.chat-copy-note {
+  font-size: 11px;
+  color: #9fe8b8;
+}
+
+/* ---------- Chat thumbnail (perception frame) ---------- */
+
+.chat-thumb-wrap {
+  margin-top: 5px;
+}
+
+.chat-thumb {
+  display: block;
+  max-width: 96px;
+  max-height: 64px;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  object-fit: cover;
+  transition: opacity 0.15s;
+}
+
+.chat-thumb:hover {
+  opacity: 0.85;
+  border-color: rgba(138, 184, 240, 0.5);
+}
+
+/* ---------- Perception frame modal / lightbox ---------- */
+
+.perception-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.perception-modal {
+  position: relative;
+  background: #1a1a22;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 12px;
+  max-width: min(90vw, 820px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.perception-modal-img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(90vh - 80px);
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.perception-modal-meta {
+  font-size: 12px;
+  color: #8ab8f0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.perception-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #b9b9c4;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.perception-modal-close:hover {
+  color: #e8e8ee;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------- Perception history section (Objects tab) ---------- */
+
+.perc-section {
+  background: rgba(138, 184, 240, 0.04);
+  border: 1px solid rgba(138, 184, 240, 0.12);
+  border-radius: 7px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.perc-summary {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8ab8f0;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.perc-summary::-webkit-details-marker {
+  display: none;
+}
+
+.perc-summary::before {
+  content: "\25b6  ";
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.perc-section[open] > .perc-summary::before {
+  content: "\25bc  ";
+}
+
+.perc-body {
+  padding: 0 10px 8px;
+}
+
+.perc-empty {
+  padding: 12px 0 4px;
+  font-size: 12px;
+  color: #7a7a8a;
+  line-height: 1.6;
+}
+
+/* Thumbnail */
+.perc-thumb-wrap {
+  margin-bottom: 8px;
+}
+
+.perc-thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  object-fit: cover;
+  transition: opacity 0.15s;
+}
+
+.perc-thumb:hover {
+  opacity: 0.85;
+  border-color: rgba(138, 184, 240, 0.5);
+}
+
+.perc-no-image {
+  font-size: 11px;
+  color: #5a5a6a;
+  font-style: italic;
+  margin-bottom: 6px;
+}
+
+/* Status badge */
+.perc-status {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 7px;
+}
+
+.perc-status--pending {
+  background: rgba(255, 200, 80, 0.14);
+  color: #f0c860;
+}
+
+.perc-status--succeeded {
+  background: rgba(80, 200, 140, 0.14);
+  color: #9fe8b8;
+}
+
+.perc-status--failed {
+  background: rgba(220, 80, 80, 0.14);
+  color: #f09090;
+}
+
+/* Metadata rows */
+.perc-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.perc-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #7a7a8a;
+}
+
+.perc-meta-row > span:first-child {
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.perc-meta-row > span:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #b9b9c4;
+  word-break: break-all;
+}
+
+/* Clear button */
+.perc-clear-row {
+  margin-top: 4px;
+}
+
+.perc-clear-btn {
+  width: 100%;
+  text-align: center;
+  font-size: 11px;
+}
+/* benchmark panel — arranges existing ctl-* pieces, adds no new palette */
+.ctl-mount {
+  margin-top: 2px;
+}
+
+/* .ctl-row is display:flex, which outranks the hidden attribute on its own */
+.ctl-row[hidden] {
+  display: none;
+}
+
+.ctl-bench-select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+/* "Task" is one short word and does not need the 92px gutter the result rows
+   use. Reclaiming it gives the select room for the longest option,
+   "ObjectNav — Seekr Extended", instead of truncating it. Scoped to this row,
+   so Episode/Target/Instruction keep their existing alignment. */
+.benchmark-panel .ctl-bench-task .ctl-label {
+  width: auto;
+  flex: 0 0 auto;
+  margin-right: 8px;
+}
+
+.ctl-number {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  color: #e8e8ee;
+  background: rgba(120, 180, 255, 0.12);
+  border: 1px solid rgba(120, 180, 255, 0.45);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+.ctl-number:focus {
+  outline: none;
+  border-color: #78b4ff;
+}
+
+/* the "1–100" hint beside the episode field */
+.ctl-bench-range {
+  width: auto;
+  text-align: left;
+  opacity: 0.55;
+}
+
+/* a value that may wrap to several lines (the VLN instruction) */
+.ctl-bench-wrap {
+  align-items: flex-start;
+}
+
+.ctl-bench-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+  opacity: 0.8;
+}
+
+/* readout values here are text, not the 44px numeric column */
+.ctl-bench-value {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+/* ── LAST RESULT | SEEKR ACTIONS ──────────────────────────────────────────
+   Two compact columns rather than one long stack, so a live run can be
+   watched without scrolling past the result fields. Same heading typography,
+   same row height, no cards and no scroll area. */
+.ctl-bench-columns {
+  display: flex;
+  column-gap: 12px;
+  align-items: flex-start;
+}
+
+/* The result column carries longer labels and wider values, so it gets the
+   larger share. Both shrink freely — the pair has to fit the sidebar rather
+   than the sidebar accommodate the pair. */
+/* 55 / 45. The result column carries the longer labels ("Navigation valid")
+   and wider values; the action column needs only an index and a short name
+   ("strafe right"). Both still shrink, so the pair fits the sidebar rather
+   than the sidebar accommodating the pair. */
+/* 58 / 42. The result column carries the longest label in the panel now
+   ("Traversability violations"); the action column needs only an index and a
+   short name ("strafe right"). Both still shrink, so the pair fits the
+   sidebar rather than the sidebar accommodating the pair. */
+.ctl-bench-columns .ctl-bench-column {
+  flex: 58 1 0;
+  min-width: 0;
+}
+
+.ctl-bench-columns .ctl-bench-column + .ctl-bench-column {
+  flex: 42 1 0;
+}
+
+/* Inside the columns the shared 92px label gutter no longer fits twice over,
+   so labels size to their own text and wrap when they must. "Shortest path"
+   and "Navigation valid" take two lines at this width; everything stays
+   readable, and the sidebar keeps its original 280px. */
+.ctl-bench-columns .ctl-label {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Values hug the right edge, so the two columns read as aligned pairs even
+   when a label above them wraps. */
+.ctl-bench-columns .ctl-bench-value {
+  flex: 0 1 auto;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+/* The action rows are index + name and never need to wrap. */
+.ctl-bench-columns .ctl-bench-action .ctl-bench-value {
+  text-align: left;
+  flex: 1 1 auto;
+}
+
+/* The section headings sit at the top of their own column, so they line up
+   with each other rather than with the rows below them. */
+.ctl-bench-columns .ctl-section {
+  margin-top: 10px;
+}
+
+/* The step number is a narrow fixed gutter, so the action names align even
+   as the index grows from 1 to 500. */
+.ctl-bench-columns .ctl-bench-action-index {
+  flex: 0 0 22px;
+  width: 22px;
+  text-align: right;
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+.ctl-bench-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+
+.ctl-bench-buttons .ctl-button {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 4px;
+  text-align: center;
+}
+
+/* Benchmark labels are words, not axis names: "Shortest path" and "Final
+   distance" need more than the 64px shared column and must not wrap. Scoped
+   to this panel so the sliders above keep their existing alignment. */
+.benchmark-panel .ctl-label {
+  width: 92px;
+  white-space: nowrap;
+}
+
+/* ── Seekr Vision (latest egocentric frame) ─────────────────────────────── */
+#seekr-vision {
+  position: relative;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.35);
+  margin-bottom: 8px;
+}
+
+#seekr-vision img {
+  display: none;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+#seekr-vision .vision-empty {
+  padding: 28px 8px;
+  font-size: 11px;
+  color: #7a7a8a;
+  text-align: center;
+}
+
+#seekr-vision .vision-meta {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  font-size: 10px;
+  color: #c8c8d8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Memories tab ───────────────────────────────────────────────────────── */
+.memory-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 5px;
+  margin-bottom: 6px;
+}
+
+/* ── Seekr Vision: Liquid AI perception ─────────────────────────────────── */
+#seekr-vision .vision-model {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #9fd3ff;
+  opacity: 0.9;
+}
+
+#seekr-vision .vision-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 4px;
+}
+
+#seekr-vision .vision-status {
+  font-size: 11px;
+  color: #a8a8b8;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#seekr-vision .vision-status.busy {
+  color: #ffd27a;
+}
+
+#seekr-vision .vision-analyze {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 3px 10px;
+}
+
+#seekr-vision .vision-result {
+  padding: 0 8px 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e8e8ee;
+  max-height: 7.5em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+#seekr-vision .vision-result:empty {
+  display: none;
+}
+
+#seekr-vision .vision-result.error {
+  color: #ff9c9c;
+}
+
+/* ── Perception tab ─────────────────────────────────────────────────────── */
+.perception-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #e8e8ee;
+  white-space: pre-wrap;
+  padding: 4px 2px 10px;
+}
+
+.perception-text.error {
+  color: #ff9c9c;
+}
+
+#seekr-vision .vision-status.error {
+  color: #ff9c9c;
+}
+
+/* ── Perception history entries ─────────────────────────────────────────── */
+.perception-model {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #9fd3ff;
+  opacity: 0.9;
+  margin: -4px 0 8px;
+}
+
+.perception-entry {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.perception-entry:last-of-type {
+  border-bottom: none;
+}
+
+.perception-header {
+  font-size: 11px;
+  color: #a8a8b8;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 4px;
+}
+
+.perception-entry .perception-text {
+  padding: 0 0 6px;
+}
+
+.perception-latency {
+  font-size: 11px;
+  color: #8ab8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Seekr Vision footer: status row + full-width button row ────────────── */
+#seekr-vision .vision-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 6px 8px 8px;
+}
+
+#seekr-vision .vision-status-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+#seekr-vision .vision-latency {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #8ab8f0;
+  font-variant-numeric: tabular-nums;
+}
+
+#seekr-vision .vision-analyze {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* ── Memories gallery ───────────────────────────────────────────────────── */
+.memory-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.memory-card {
+  display: block;
+  width: 100%;
+  padding: 6px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: #e8e8ee;
+  cursor: pointer;
+  font: inherit;
+}
+
+.memory-card:hover {
+  border-color: rgba(159, 211, 255, 0.5);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.memory-card .memory-thumb {
+  margin-bottom: 4px;
+}
+
+.memory-scene {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.memory-time {
+  font-size: 10px;
+  color: #a8a8b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-excerpt {
+  font-size: 10px;
+  color: #c8c8d8;
+  line-height: 1.35;
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.memory-badge {
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #8ab8f0;
+}
+
+.memory-badge--pending {
+  color: #ffd27a;
+}
+
+.memory-badge--error {
+  color: #ff9c9c;
+}
+
+/* ── Memory lightbox ────────────────────────────────────────────────────── */
+.memory-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.memory-lightbox.hidden {
+  display: none;
+}
+
+.memory-lightbox-card {
+  position: relative;
+  max-width: min(960px, 92vw);
+  max-height: 92vh;
+  background: rgba(20, 20, 30, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  overflow: hidden;
+  color: #e8e8ee;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.memory-lightbox-card img {
+  display: block;
+  max-width: min(960px, 92vw);
+  max-height: 70vh;
+  object-fit: contain;
+  background: #000;
+}
+
+.memory-lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.memory-lightbox-meta {
+  padding: 10px 14px 12px;
+}
+
+.memory-lightbox-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.memory-lightbox-line {
+  font-size: 11px;
+  color: #a8a8b8;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-lightbox-desc {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+
+.memory-badge--processing {
+  color: #ffd27a;
+}
+
+/* ── Discover tab ───────────────────────────────────────────────────────── */
+.discover-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8ee;
+  margin-bottom: 3px;
+}
+
+.discover-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.discover-open {
+  font-size: 11px;
+  font-weight: 600;
+  color: #9fd3ff;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.discover-open:hover {
+  text-decoration: underline;
+}
+
+/* ── Memory postcard (Black Forest Labs) ───────────────────────────────── */
+.postcard-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.memory-card {
+  position: relative;
+}
+
+.memory-card--selected {
+  border-color: rgba(255, 210, 122, 0.8);
+  box-shadow: 0 0 0 1px rgba(255, 210, 122, 0.5);
+}
+
+.memory-select {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  padding: 2px 3px;
+  line-height: 0;
+}
+
+.postcard-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
+
+.postcard-heading .perception-model {
+  position: static;
+  margin: 0;
+}
+
+.postcard-discover {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.postcard-discover.hidden {
+  display: none;
+}
+
+.postcard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.postcard-send[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
