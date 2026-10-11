@@ -1324,3 +1324,36 @@ body {
   overflow-y: auto;
   color: rgba(255, 255, 255, 0.85);
 }
+
+/* ── Talk to Seekr input (Talk tab) ─────────────────────────────────────── */
+.chat-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ee;
+  font-size: 12px;
+}
+
+.chat-row input:focus {
+  outline: none;
+  border-color: rgba(158, 203, 255, 0.6);
+}
+
+.chat-row button {
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8e8ee;
+  font-size: 12px;
+  cursor: pointer;
+}

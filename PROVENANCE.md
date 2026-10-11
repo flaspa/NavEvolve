@@ -12,6 +12,7 @@ hackathon from what was built during it.
 | `brain/liquid.py` — Liquid LFM2.5-VL-3B loader (Hugging Face Transformers) | same commit | Kept unchanged as the candidate image-description utility for the Perception milestone. Not imported yet; needs a GPU plus `torch`/`transformers` |
 | `body/public/avatar/human.glb` | Supplied by the project author on hackathon day (pre-existing asset, not created in the hackathon) | Rig and clips: Idle / Walk / Run / Turn / Talk / Dance |
 | `body/src/egoRange.js`: `cameraFromSnapshot()`, `measurementMetrics()` and the Spark `SplatMesh.raycast()` ranging approach | [flaspa/scavengeai](https://github.com/flaspa/scavengeai) @ `3334d40`: `src/egocentricRange.js`, `src/sceneMeasure.js`, `handleMeasurementClick()` in `src/main.js` | Functions copied verbatim. Only `measureCenterRange()` is new |
+| `body/src/navPath.js` (NavMesh grid + A*) and `body/src/agentControl.js` (goto / turn / face / capture / halt driven through `player.setExternalMove`) | Teammate **Jun Jiang**, flaspa/NavEvolve PR #1 branch, commit `5a8b689` (hackathon day) | Copied verbatim with an attribution header; PR #1 itself was not merged. Its WebSocket agent loop (`agent_ws.py`, `body.py`, `agent.py`, `agentLink.js`) was not adopted: Milestone 6 drives navigation from the browser instead |
 | Habitat-GS validation scenes (splats, NavMeshes, `scene.seekr.json`) | `C:\Flavia\Data\seekr-world-habitat-gs-validation`, derived from `RukawaY/gs_scenes` (val) | Local only, never committed; served by the Vite middleware at `/habitat/…` |
 
 Everything that changed after the baseline: `git diff pre-hackathon-baseline`.
@@ -117,3 +118,13 @@ Milestone 5 — Place Memory Inspector:
   Clicks on the inspector never reach the scene or pointer lock.
 - `body/src/main.js`: the Cognitive Map poll is always scene-filtered and
   refreshes when a scene activates.
+
+Milestone 6 — Talk to Seekr + memory-grounded navigation:
+- `body/src/talk.js`: typed instructions routed by explicit rules; answers are
+  grounded in stored observations (Gemini descriptions) and the cognitive
+  map. "Take me to X" searches descriptions, walks to the REAL observation
+  pose with the teammate's A* agent, faces the remembered heading, captures a
+  new view and asks Gemini to verify. "Stop" halts and restores WASD.
+- `body/src/ui.js`, `main.js`: Talk tab input, agent wiring, Enter hotkey.
+- `brain/talk.py`, `server.py`: `POST /talk/verify`, `POST /talk`,
+  `POST /observations/{id}/enrich` (reuses the Milestone 3 pipeline).

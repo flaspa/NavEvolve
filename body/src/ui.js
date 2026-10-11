@@ -127,7 +127,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     <div class="panel">
       <div class="panel-tabs">
         <button type="button" data-tab="controls" class="active">Controls</button>
-        <button type="button" data-tab="chat">Log</button>
+        <button type="button" data-tab="chat">Talk</button>
       </div>
       <div class="panel-body" data-tab-panel="controls"></div>
       <div class="panel-body hidden" data-tab-panel="chat">
@@ -139,6 +139,10 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
           <span class="chat-copy-note" data-role="copy-chat-note" aria-live="polite"></span>
         </div>
         <div class="chat-log" data-role="log"></div>
+        <form class="chat-row" data-role="form">
+          <input type="text" data-role="input" placeholder="Talk to Seekr… (Enter)" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
       </div>
     </div>
     <button type="button" class="edge-toggle edge-toggle-right"
@@ -475,6 +479,18 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
   // ---------- chat ----------
   const logEl = sidebar.querySelector('[data-role="log"]');
+  const formEl = sidebar.querySelector('[data-role="form"]');
+  const inputEl = sidebar.querySelector('[data-role="input"]');
+
+  let submitHandler = null;
+  formEl.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = "";
+    inputEl.blur(); // give WASD control back after sending
+    submitHandler?.(text);
+  });
 
   // ---------- copy chat (read-only research utility) ----------
   // Reads the speaker and message text of the chat lines currently shown and
@@ -856,6 +872,15 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
     addMessage,
     addMessageWithFrame,
+
+    onSubmit(fn) {
+      submitHandler = fn;
+    },
+
+    focusInput() {
+      showTab("chat");
+      inputEl.focus();
+    },
 
     /** The speaker label evaluator feedback is posted under. */
     EVALUATOR_SPEAKER,

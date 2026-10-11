@@ -21,6 +21,9 @@ Endpoints:
     GET  /gallery          contact-sheet view of stored observations
     POST /sessions         start a new capture session (observations kept)
     GET  /cognitive-map    latest cognitive graph + harness status/policy
+    POST /observations/{id}/enrich   Gemini description for one observation (perception.py)
+    POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
+    POST /talk             {question, memories[]} → Gemini answer grounded in those memories
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -44,6 +47,8 @@ load_dotenv(_HERE / ".env")
 
 import db  # noqa: E402  (needs the environment loaded first)
 import memory  # noqa: E402
+import perception  # noqa: E402
+import talk  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -234,3 +239,43 @@ async def cognitive_map(scene_id: str | None = None) -> dict:
         return await anyio.to_thread.run_sync(_cognitive_map, scene_id)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
+
+
+@app.post("/observations/{obs_id}/enrich")
+async def enrich_observation(obs_id: str) -> dict:
+    """Runs the Milestone 3 pipeline on one observation (idempotent) and returns its description."""
+    try:
+        await anyio.to_thread.run_sync(perception.enrich_observation, obs_id, False)
+        doc = await anyio.to_thread.run_sync(db.get_observation, obs_id, False)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"enrichment failed: {type(exc).__name__}: {exc}"[:300]) from exc
+    if doc is None:
+        raise HTTPException(status_code=404, detail="observation not found")
+    return {"id": obs_id, "description": doc.get("description"), "description_text": doc.get("description_text"),
+            "perception": doc.get("perception")}
+
+
+class VerifyRequest(BaseModel):
+    observation_id: str
+    goal: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/talk/verify")
+async def talk_verify(req: VerifyRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(talk.verify, req.observation_id, req.goal)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"verify failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class TalkRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+    memories: list[dict] = Field(default_factory=list)
+
+
+@app.post("/talk")
+async def talk_answer(req: TalkRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(talk.answer, req.question, req.memories)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"talk failed: {type(exc).__name__}: {exc}"[:300]) from exc

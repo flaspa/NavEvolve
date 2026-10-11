@@ -67,6 +67,8 @@ import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
 import { measureCenterRange } from "./egoRange.js";
 import { createCognitiveMap } from "./cognitiveMap.js";
+import { createAgentControl } from "./agentControl.js";
+import { createTalk } from "./talk.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -212,6 +214,51 @@ async function pollCognitiveMap() {
 
 pollCognitiveMap();
 setInterval(pollCognitiveMap, 10_000);
+
+// Talk to Seekr (hackathon): typed instructions → memory lookup → navigation.
+// Navigation reuses the teammate's agentControl (A* over the NavMesh grid);
+// walking goes through player.setExternalMove, so the NavMesh constraint holds.
+const agent = createAgentControl({
+  getPlayer: () => player,
+  getMeshes: () => getNavmeshMeshes(),
+  captureEgo: () => captureEgo(),
+  measureRange: (frame) => measureCenterRange({
+    splatMesh,
+    cameraSnapshot: frame.cameraSnapshot,
+    metersPerUnit: activeScene?.geometry?.metersPerUnit ?? 1,
+    environmentScale: CONFIG.environment.scale,
+  }),
+  brainUrl: APP_CONFIG.brainUrl,
+});
+let agentWalking = false;
+agent.busy = () => agentWalking;
+{
+  const goto = agent.goto;
+  agent.goto = async (args) => {
+    agentWalking = true;
+    try {
+      return await goto(args);
+    } finally {
+      agentWalking = false;
+    }
+  };
+}
+
+const talk = createTalk({
+  ui,
+  agent,
+  brainUrl: APP_CONFIG.brainUrl,
+  getScene: () => activeScene,
+  captureObservation: (trigger) => captureObservation(trigger),
+});
+ui.onSubmit((text) => talk.handle(text));
+
+// Real user WASD takes control back from a walk in progress (isTrusted: only
+// genuine input can do this), exactly as "stop" would.
+window.addEventListener("keydown", (event) => {
+  if (!agentWalking || !event.isTrusted || isTyping()) return;
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) talk.stop();
+});
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -1301,6 +1348,12 @@ window.addEventListener("keydown", (event) => {
     if (navmeshMesh) setNavmeshVisible(!navmeshMesh.visible);
   }
 
+  if (event.code === "Enter") {
+    player.controls.unlock();
+    ui.focusInput();
+    event.preventDefault();
+  }
+
   if (event.code === "KeyP") {
     // REPORT ONLY: where Seekr is, plus a paste-ready defaultStart snippet.
     const pose = player.getAgentPose();
@@ -1326,6 +1379,7 @@ window.addEventListener("keydown", (event) => {
 // Animation loop
 // ---------------------------------------------------------------------------
 startLoop(renderer, scene, camera, (delta) => {
+  agent.update(delta); // drives a walk in progress through player.setExternalMove
   player?.update(delta);
   avatar?.update(delta);
 
@@ -1369,6 +1423,8 @@ window.__seekr = {
   },
   captureObservation,
   cognitiveMap,
+  agent,
+  talk,
   get player() {
     return player;
   },

@@ -43,6 +43,9 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `GET /observations` | recent observations (metadata) and total |
 | `GET /observations/{id}/image.jpg` | the stored JPEG |
 | `GET /gallery` | contact-sheet gallery of stored observations (also linked from the HUD), with New Session / Clear Observations |
+| `POST /talk/verify` | `{observation_id, goal}` → Gemini: is the goal visible in that stored JPEG? |
+| `POST /talk` | `{question, memories[]}` → Gemini answer grounded only in those memories |
+| `POST /observations/{id}/enrich` | run the Gemini description pipeline on one observation |
 | `GET /cognitive-map` | latest cognitive graph (no vectors) + policy + harness status, drawn in the Cognitive Map panel; click a node to inspect that place's photos and descriptions |
 | `POST /sessions` | start a new capture session (observations kept) |
 | `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
@@ -88,6 +91,19 @@ baseline policy.
 The policy uses only Gemini image/text embeddings and the splat range.
 Simulator pose is used only for display and to derive approximate evaluation
 labels (same viewpoint: ≤ 1.5 m and ≤ 45°; different: ≥ 3 m).
+
+## Talk to Seekr
+
+Type in the **Talk** tab (or press Enter). Supported:
+
+| You say | Seekr does |
+|---|---|
+| `Seekr, what places do you remember?` | lists the cognitive map's places with their descriptions |
+| `Have you seen a dining table?` | searches stored Gemini descriptions; reports when/where, or "no memory" |
+| `Take me to the place where you saw the dining table.` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
+| `What do you see here?` | captures a view and reads back Gemini's description |
+| `Stop.` | halts the walk immediately; WASD is restored |
+| anything else | Gemini answers grounded only in matching memories |
 
 ## Controls
 
