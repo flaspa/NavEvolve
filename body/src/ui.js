@@ -206,6 +206,10 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const tabButtons = [...sidebar.querySelectorAll(".panel-tabs button")];
   const tabPanels = [...sidebar.querySelectorAll("[data-tab-panel]")];
   const cognitiveMapPanel = sidebar.querySelector('[data-role="cognitive-map-body"]');
+  const cognitiveMapFooter = {
+    policy: sidebar.querySelector('[data-role="policy-version"]'),
+    harness: sidebar.querySelector('[data-role="harness-status"]'),
+  };
 
   /**
    * Chat speakers that get their own styling.
@@ -807,6 +811,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
     /** Body of the Cognitive Map panel below the minimap (next milestone). */
     cognitiveMapPanel,
+    cognitiveMapFooter,
 
     buildControls,
     getControlMount,

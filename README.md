@@ -14,8 +14,8 @@ reused and what is new.
 |---|---|---|
 | **Body** (`body/`) | 3D world (Three.js + Spark splats), human avatar, NavMesh-constrained WASD locomotion, minimap, egocentric frame capture (`frameCapture.js`) | ✅ working (reused) |
 | **Perception** (`brain/perception.py`) | ego JPEG + pose + camera + Gaussian-splat centre range → MongoDB `observations`; Gemini 3.8 Flash structured description + separate 768-d image and text embeddings (Gemini Embedding 2) on the same document | capture ✅ · enrichment ✅ (1 observation so far) |
-| **Memory** (`brain/db.py`) | persistent graph of places in MongoDB Atlas | connection ✅ · graph next |
-| **Harness** | automatic improvement of the place-recognition policy | next milestone |
+| **Memory** (`brain/memory.py`) | cognitive map: observations replayed chronologically, matched to place memories by a weighted visual/semantic/range policy, places + traversal edges persisted in `cognitive_graphs` | ✅ |
+| **Harness** (`brain/harness.py`) | replays observations, measures missed revisits / false merges against pose-derived reference pairs (selection vs frozen held-out split), searches candidate policies, adopts only on improvement, persists `harness_policies` / `harness_runs`, rebuilds the graph | ✅ |
 
 ```
 body/   Vite app — main.js wires world.js, player.js, avatar.js, minimap.js, ui.js
@@ -43,6 +43,7 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `GET /observations` | recent observations (metadata) and total |
 | `GET /observations/{id}/image.jpg` | the stored JPEG |
 | `GET /gallery` | contact-sheet gallery of stored observations (also linked from the HUD), with New Session / Clear Observations |
+| `GET /cognitive-map` | latest cognitive graph (no vectors) + policy + harness status, drawn in the Cognitive Map panel |
 | `POST /sessions` | start a new capture session (observations kept) |
 | `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
 
@@ -68,6 +69,18 @@ connection string.
 cd brain
 .venv/Scripts/python perception.py --id <observation_id>   # or no --id: oldest un-enriched
 ```
+
+**Recursive harness** (Policy vN → evaluate → optimise → Policy vN+1 → evaluate):
+
+```bash
+cd brain
+.venv/Scripts/python harness.py --reset   # start from Policy v1
+.venv/Scripts/python harness.py           # each run may adopt the next version
+```
+
+The policy uses only Gemini image/text embeddings and the splat range.
+Simulator pose is used only for display and to derive approximate evaluation
+labels (same viewpoint: ≤ 1.5 m and ≤ 45°; different: ≥ 3 m).
 
 ## Controls
 

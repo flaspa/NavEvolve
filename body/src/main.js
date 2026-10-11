@@ -66,6 +66,7 @@ import { loadSceneProfile } from "./sceneProfile.js";
 import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
 import { measureCenterRange } from "./egoRange.js";
+import { createCognitiveMap } from "./cognitiveMap.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -188,6 +189,26 @@ async function pollBrainStatus() {
 
 pollBrainStatus();
 setInterval(pollBrainStatus, 10_000);
+
+// Cognitive Map panel (hackathon) — read-only view of the graph the harness
+// built in MongoDB (GET /cognitive-map), for the active scene.
+const cognitiveMap = createCognitiveMap({
+  mount: ui.cognitiveMapPanel,
+  footer: ui.cognitiveMapFooter,
+});
+
+async function pollCognitiveMap() {
+  try {
+    const scene = activeScene ? `?scene_id=${encodeURIComponent(activeScene.id)}` : "";
+    const res = await fetchJson(`/cognitive-map${scene}`);
+    if (res.ok) cognitiveMap.update(res.body);
+  } catch (_) {
+    // Brain offline: keep the last drawing.
+  }
+}
+
+pollCognitiveMap();
+setInterval(pollCognitiveMap, 10_000);
 
 // ---------------------------------------------------------------------------
 // Runtime state

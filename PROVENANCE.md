@@ -84,3 +84,18 @@ Milestone 3 — Gemini perception:
   `time.perf_counter()` latency. Idempotent, and leaves the JPEG, pose, camera
   and range fields untouched.
 - `brain/db.py`: the gallery list omits the embedding vectors.
+
+Milestone 4 — cognitive map and self-improving harness:
+- `brain/memory.py`: chronological place association using a weighted
+  visual/semantic/range policy. It stores place nodes (observation ids,
+  representative embeddings, description, range signature, display position)
+  and traversal edges in `cognitive_graphs`. It also derives pose-based
+  reference pairs (evaluation only) and computes the balanced-accuracy
+  evaluation.
+- `brain/harness.py`: replays observations, then searches candidates (a coarse
+  grid plus local refinement) on the selection pairs, reporting the frozen
+  held-out pairs separately. A candidate is adopted only on a strict
+  improvement, and versions, runs and status are persisted.
+- `brain/server.py`: `GET /cognitive-map`. `body/src/cognitiveMap.js` draws
+  the places and edges, and shows policy, score, place count and harness
+  status in the panel footer.

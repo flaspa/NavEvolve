@@ -20,6 +20,7 @@ Endpoints:
     GET  /observations/{id}/image.jpg  the stored JPEG
     GET  /gallery          contact-sheet view of stored observations
     POST /sessions         start a new capture session (observations kept)
+    GET  /cognitive-map    latest cognitive graph + harness status/policy
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -27,6 +28,7 @@ from __future__ import annotations
 
 import base64
 import os
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -41,6 +43,7 @@ _HERE = Path(__file__).resolve().parent
 load_dotenv(_HERE / ".env")
 
 import db  # noqa: E402  (needs the environment loaded first)
+import memory  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -215,3 +218,19 @@ async def clear_observations(request: Request, expected: int, scene_id: str | No
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
     return {"ok": True, "deleted": deleted, "scene_id": scene_id}
+
+
+def _cognitive_map(scene_id: str | None) -> dict:
+    status = db.get_db()["harness_runs"].find_one({"_id": "status"}, {"_id": 0}) or {"status": "idle"}
+    if isinstance(status.get("updated_at"), datetime):
+        status["updated_at"] = status["updated_at"].isoformat()
+    return {"graph": memory.latest_graph(scene_id), "harness": status}
+
+
+@app.get("/cognitive-map")
+async def cognitive_map(scene_id: str | None = None) -> dict:
+    """Read-only: places (no vectors), traversal edges, policy and harness status."""
+    try:
+        return await anyio.to_thread.run_sync(_cognitive_map, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
