@@ -13,7 +13,7 @@ reused and what is new.
 | Component | Role | Status |
 |---|---|---|
 | **Body** (`body/`) | 3D world (Three.js + Spark splats), human avatar, NavMesh-constrained WASD locomotion, minimap, egocentric frame capture (`frameCapture.js`) | ✅ working (reused) |
-| **Perception** | captured views → descriptions / embeddings | next milestone |
+| **Perception** | ego JPEG + pose + camera + Gaussian-splat centre range → MongoDB `observations` · embeddings next | capture ✅ |
 | **Memory** (`brain/db.py`) | persistent graph of places in MongoDB Atlas | connection ✅ · graph next |
 | **Harness** | automatic improvement of the place-recognition policy | next milestone |
 
@@ -39,6 +39,9 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `GET /health` | liveness |
 | `GET /db/health` | real MongoDB Atlas ping |
 | `POST /db/roundtrip` | insert, read back and delete one test document |
+| `POST /observations` | store an ego JPEG + pose + camera snapshot + splat range |
+| `GET /observations` | recent observations (metadata) and total |
+| `GET /observations/{id}/image.jpg` | the stored JPEG |
 
 **Frontend** — http://localhost:5000
 
@@ -59,4 +62,4 @@ connection string.
 ## Controls
 
 WASD move (Shift run) · mouse / arrows look · V first/third person ·
-N NavMesh wireframe · P report pose
+C capture view (also automatic every 2 m) · N NavMesh wireframe · P report pose

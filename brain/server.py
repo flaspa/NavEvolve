@@ -14,17 +14,23 @@ Endpoints:
                            Analyze Vision disabled)
     GET  /db/health        real MongoDB Atlas ping
     POST /db/roundtrip     insert → read back → delete one test document
+    POST /observations     store one egocentric JPEG + pose + camera + range
+    GET  /observations     recent observation metadata (+ count)
+    GET  /observations/{id}            metadata
+    GET  /observations/{id}/image.jpg  the stored JPEG
 """
 
 from __future__ import annotations
 
+import base64
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import anyio
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 _HERE = Path(__file__).resolve().parent
@@ -83,3 +89,66 @@ async def db_roundtrip() -> dict:
         return await anyio.to_thread.run_sync(db.roundtrip)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
+
+
+MAX_IMAGE_BYTES = int(os.environ.get("MAX_IMAGE_BYTES", "4000000"))
+
+
+class Observation(BaseModel):
+    image_data_url: str = Field(min_length=32)
+    scene_id: str
+    timestamp: int                      # client epoch ms
+    trigger: str = "manual"             # "manual" | "auto-distance"
+    pose: dict                          # {x, y, z, headingDeg, pitchDeg}
+    camera_snapshot: dict               # frameCapture.js cameraSnapshot
+    image_width: int | None = None
+    image_height: int | None = None
+    range: dict | None = None           # egoRange.js centre measurement
+
+
+def _decode_jpeg(data_url: str) -> bytes:
+    header, _, payload = data_url.partition(",")
+    if not header.startswith("data:image/jpeg;base64"):
+        raise HTTPException(status_code=422, detail="image_data_url must be a base64 JPEG data URL")
+    jpeg = base64.b64decode(payload, validate=True)
+    if len(jpeg) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="image too large")
+    return jpeg
+
+
+@app.post("/observations")
+async def create_observation(obs: Observation) -> dict:
+    jpeg = _decode_jpeg(obs.image_data_url)
+    doc = obs.model_dump(exclude={"image_data_url"})
+    try:
+        obs_id = await anyio.to_thread.run_sync(db.insert_observation, doc, jpeg)
+        total = await anyio.to_thread.run_sync(db.count_observations, None)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"ok": True, "id": obs_id, "image_bytes": len(jpeg), "total": total}
+
+
+@app.get("/observations")
+async def recent_observations(scene_id: str | None = None, limit: int = 20) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 100))
+        total = await anyio.to_thread.run_sync(db.count_observations, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"total": total, "items": items}
+
+
+@app.get("/observations/{obs_id}")
+async def observation(obs_id: str) -> dict:
+    doc = await anyio.to_thread.run_sync(db.get_observation, obs_id, False)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="observation not found")
+    return doc
+
+
+@app.get("/observations/{obs_id}/image.jpg")
+async def observation_image(obs_id: str) -> Response:
+    jpeg = await anyio.to_thread.run_sync(db.get_observation, obs_id, True)
+    if jpeg is None:
+        raise HTTPException(status_code=404, detail="observation not found")
+    return Response(content=jpeg, media_type="image/jpeg")

@@ -65,6 +65,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-status" data-role="status">Initializing…</div>
       <div class="hud-pos" data-role="pos"></div>
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
+      <div class="hud-pos" data-role="captures">Observations: —</div>
       <div class="hud-view">
         <button type="button" data-mode="first">1st Person</button>
         <button type="button" data-mode="third">3rd Person</button>
@@ -72,7 +73,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-help" data-role="help">
         Click scene + move mouse, or use arrow keys to look around<br>
         <b>Esc</b> release mouse · <b>WASD</b> move · <b>V</b> change view<br>
-        <b>N</b> NavMesh · <b>P</b> report position
+        <b>C</b> capture view · <b>N</b> NavMesh · <b>P</b> report position
       </div>
     </div>
     <button type="button" class="edge-toggle edge-toggle-left"
@@ -92,6 +93,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const posEl = root.querySelector('[data-role="pos"]');
   const cameraPosEl = root.querySelector('[data-role="camera-pos"]');
   const helpEl = root.querySelector('[data-role="help"]');
+  const capturesEl = root.querySelector('[data-role="captures"]');
   const viewButtons = [...root.querySelectorAll(".hud-view button")];
 
   let viewChangeHandler = null;
@@ -782,6 +784,11 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     /** Active camera world position, labelled by camera mode. */
     setCameraPosition(mode, x, y, z) {
       cameraPosEl.textContent = formatCameraPosition(mode, x, y, z);
+    },
+
+    /** Observation counter line (captures this session / stored in MongoDB). */
+    setCaptureStatus(text) {
+      capturesEl.textContent = text;
     },
 
     setHelpVisible(visible) {

@@ -65,6 +65,7 @@ import {
 import { loadSceneProfile } from "./sceneProfile.js";
 import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
+import { measureCenterRange } from "./egoRange.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -167,6 +168,13 @@ async function pollBrainStatus() {
   try {
     await fetchJson("/health");
     const db = await fetchJson("/db/health");
+    if (db.ok && sessionCaptures === 0) {
+      const obs = await fetchJson("/observations?limit=1");
+      if (obs.ok) {
+        observationCount = obs.body.total;
+        showCaptureCount();
+      }
+    }
     text = db.ok
       ? `Brain: online · MongoDB: connected (${db.body.database})`
       : `Brain: online · MongoDB: ${db.body?.detail ?? "unavailable"}`;
@@ -730,7 +738,8 @@ function getCaptureEgoView() {
     position: [position.x, eyeY, position.z],
     heading,
     quaternion,
-    hide: [avatar.object],
+    // Observations show only the world: no avatar body, no NavMesh overlay.
+    hide: [avatar.object, ...getNavmeshMeshes()],
   };
 }
 
@@ -741,7 +750,7 @@ function captureEgo() {
   if (!player || !avatar || !activeScene) return null;
 
   const egoView = getCaptureEgoView();
-  const { dataUrl, cameraSnapshot } = captureEgoFrame(renderer, scene, camera, egoView, {
+  const { dataUrl, width, height, cameraSnapshot } = captureEgoFrame(renderer, scene, camera, egoView, {
     quality: CONFIG.capture.quality,
     maxWidth: CONFIG.capture.maxWidth,
   });
@@ -749,11 +758,14 @@ function captureEgo() {
   const pose = player.getAgentPose();
   lastEgoFrame = {
     dataUrl,
+    width,
+    height,
     sceneId: activeScene.id,
     sceneName: activeScene.displayName,
     timestamp: Date.now(),
     observedFrom: {
       x: +pose.position.x.toFixed(3),
+      y: +pose.position.y.toFixed(3),
       z: +pose.position.z.toFixed(3),
       headingDeg: +quaternionToHeadingDeg(pose.rotation).toFixed(1),
       pitchDeg: +(player.getEyePitch?.() ?? 0).toFixed(1),
@@ -762,6 +774,76 @@ function captureEgo() {
   };
 
   return lastEgoFrame;
+}
+
+// ---------------------------------------------------------------------------
+// Observations (hackathon) — ego JPEG + pose + exact camera + centre range,
+// stored in MongoDB through brain/server.py. Captured manually (Capture View)
+// and automatically every AUTO_CAPTURE_EVERY_M metres of avatar travel.
+// ---------------------------------------------------------------------------
+const AUTO_CAPTURE_EVERY_M = 2;
+let observationCount = 0;
+let sessionCaptures = 0;
+let travelledSinceCapture = 0;
+const lastTravelPos = new THREE.Vector3(NaN, NaN, NaN);
+
+function showCaptureCount(note = "") {
+  ui.setCaptureStatus(
+    `Observations: ${sessionCaptures} this session · ${observationCount} in MongoDB${note ? ` · ${note}` : ""}`,
+  );
+}
+
+async function captureObservation(trigger = "manual") {
+  const frame = captureEgo();
+  if (!frame) return null;
+  travelledSinceCapture = 0;
+
+  const range = measureCenterRange({
+    splatMesh,
+    cameraSnapshot: frame.cameraSnapshot,
+    metersPerUnit: activeScene.geometry?.metersPerUnit ?? 1,
+    environmentScale: CONFIG.environment.scale,
+  });
+
+  try {
+    const response = await fetch(`${APP_CONFIG.brainUrl}/observations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_data_url: frame.dataUrl,
+        scene_id: frame.sceneId,
+        timestamp: frame.timestamp,
+        trigger,
+        pose: frame.observedFrom,
+        camera_snapshot: frame.cameraSnapshot,
+        image_width: frame.width,
+        image_height: frame.height,
+        range,
+      }),
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+    sessionCaptures += 1;
+    observationCount = body.total;
+    const dist = range.distanceM === null ? "no surface" : `${range.distanceM.toFixed(2)} m ahead`;
+    showCaptureCount(dist);
+    console.log(`[observation] ${trigger} stored ${body.id} · range ${dist}`);
+    return { id: body.id, range };
+  } catch (err) {
+    console.error("[observation] store failed:", err);
+    showCaptureCount(`store failed — ${err.message}`);
+    return null;
+  }
+}
+
+function trackTravelForAutoCapture() {
+  if (!avatar || !activeScene) return;
+  const p = avatar.object.position;
+  if (Number.isFinite(lastTravelPos.x)) {
+    travelledSinceCapture += Math.hypot(p.x - lastTravelPos.x, p.z - lastTravelPos.z);
+  }
+  lastTravelPos.copy(p);
+  if (travelledSinceCapture >= AUTO_CAPTURE_EVERY_M) captureObservation("auto-distance");
 }
 
 // ---------------------------------------------------------------------------
@@ -917,6 +999,15 @@ function buildControlPanel() {
       id: "load-selected-scene",
       label: "Load Selected Scene",
       onClick: () => loadSceneById(currentSceneSelection()),
+    },
+
+    { type: "section", label: "OBSERVATIONS" },
+
+    {
+      type: "button",
+      id: "capture-view",
+      label: "Capture View (C)",
+      onClick: () => captureObservation("manual"),
     },
 
     { type: "section", label: "LAYERS" },
@@ -1174,6 +1265,10 @@ window.addEventListener("keydown", (event) => {
     setViewMode(player.mode === "third" ? "first" : "third");
   }
 
+  if (event.code === "KeyC") {
+    captureObservation("manual");
+  }
+
   if (event.code === "KeyN") {
     if (navmeshMesh) setNavmeshVisible(!navmeshMesh.visible);
   }
@@ -1213,6 +1308,7 @@ startLoop(renderer, scene, camera, (delta) => {
 
   ui.setFloorplanPosition(seekrPosition.x, seekrPosition.z);
   syncAgentPosePanel();
+  trackTravelForAutoCapture();
   ui.setCameraPosition(
     player?.mode ?? "first",
     cameraWorldPosition.x,
@@ -1243,6 +1339,7 @@ window.__seekr = {
   get lastEgoFrame() {
     return lastEgoFrame;
   },
+  captureObservation,
   get player() {
     return player;
   },
