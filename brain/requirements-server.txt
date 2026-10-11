@@ -1,0 +1,9 @@
+# NavEvolve minimal backend (server.py) — no GPU, no model.
+# The legacy Seekr perception Brain (app.py) uses requirements.txt instead.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pymongo[srv]>=4.8
+python-dotenv>=1.0
+# tests
+pytest>=8
+httpx>=0.27

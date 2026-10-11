@@ -147,7 +147,7 @@ const CONFIG = {
   },
 };
 
-const AVATAR_URL = "/avatar/Seeker.glb";
+const AVATAR_URL = "/avatar/human.glb";
 const BRAIN_SESSION_ID = getOrCreateSessionId();
 
 function applySceneDescriptor(descriptor) {
@@ -1046,12 +1046,14 @@ async function analyzeVision(task = null) {
 
 const lastLivePos = new THREE.Vector3(Infinity, Infinity, Infinity);
 const lastLiveQuat = new THREE.Quaternion();
+const _liveEyeQ = new THREE.Quaternion();
 
 function refreshLiveVision() {
   if (!player || !avatar) return;
 
   const pose = player.getAgentPose();
-  const eye = player.getEyeQuaternion();
+  // getEyeQuaternion() returns [x, y, z, w]; wrap it so .dot()/.copy() work.
+  const eye = _liveEyeQ.fromArray(player.getEyeQuaternion());
   const moved = pose.position.distanceTo(lastLivePos) > CONFIG.vision.minMoveM;
   const turned =
     THREE.MathUtils.radToDeg(2 * Math.acos(Math.min(1, Math.abs(eye.dot(lastLiveQuat))))) >
@@ -1511,7 +1513,7 @@ worldReady
       url: AVATAR_URL,
       position: [spawnX, spawnY, spawnZ],
       scale: CONFIG.player.avatarVisualScale,
-      // Seeker.glb is authored facing +Z, so no model-axis correction.
+      // human.glb (same rig layout as Seeker.glb) is authored facing +Z.
       facingOffset: 0,
     });
 
