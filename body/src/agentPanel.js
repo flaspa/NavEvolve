@@ -38,19 +38,7 @@ export function createAgentPanel({ ui, minimap }) {
       status.textContent = line;
     },
     memory({ objects }) {
-      const body = ui.cognitiveMapPanel;
-      body.classList.toggle("has-objs", objects.length > 0);
-      body.replaceChildren(
-        ...objects.map((o) => {
-          const row = document.createElement("div");
-          row.className = "agent-obj";
-          const [x, , z] = o.position;
-          row.innerHTML = `<span></span><span>${Math.round((o.confidence ?? 0) * 100)}% (${x.toFixed(1)}, ${z.toFixed(1)})</span>`;
-          row.firstChild.textContent = o.name;
-          return row;
-        }),
-      );
-      if (!objects.length) body.textContent = "Awaiting observations";
+      // The Cognitive Map panel belongs to the place graph (cognitiveMap.js); objects go on the minimap.
       minimap.setMarkers(objects.map((o) => ({ x: o.position[0], z: o.position[2], label: o.name })));
     },
     path(points) {

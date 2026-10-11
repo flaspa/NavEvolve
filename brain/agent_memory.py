@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -80,14 +83,39 @@ def _ingest_sync(obs_id: str) -> None:
         desc = models.describe(jpeg)
         objs = [{**o, "emb": models.embed_text(f"{o['name']}: {o.get('description', '')}").tolist()}
                 for o in models.list_objects(jpeg)]
-        coll.update_one({"_id": oid}, {"$set": {
-            "img_emb": models.embed_image(jpeg).tolist(), "desc": desc,
-            "desc_emb": models.embed_text(desc).tolist(), "objects": objs, "ingest": "done"}})
+        img_emb, desc_emb = models.embed_image(jpeg).tolist(), models.embed_text(desc).tolist()
+        fields = {"img_emb": img_emb, "desc": desc, "desc_emb": desc_emb, "objects": objs, "ingest": "done"}
+        if not os.environ.get("GEMINI_API_KEY") and (obs.get("perception") or {}).get("status") != "done":
+            # ponytail: main's perception.py isn't configured, so feed the place graph (memory.py) our
+            # Gemini outputs in its field names. Don't mix with perception.py docs (different dims).
+            fields.update({"image_embedding": img_emb, "text_embedding": desc_emb,
+                           "description": {"summary": desc.split(". ")[0][:200]}, "description_text": desc,
+                           "perception": {"status": "done", "source": "agent_memory", "embedding_model": "gemini-embedding-2"}})
+        coll.update_one({"_id": oid}, {"$set": fields})
         for o in objs:
             _merge(obs["scene_id"], obs_id, o, object_position(obs, o["bbox"]))
     except Exception:
         coll.update_one({"_id": oid}, {"$set": {"ingest": "error"}})
         raise
+    try:
+        _rebuild_graph(obs["scene_id"])
+    except Exception as e:  # the DAG is display; never fail ingest over it
+        print(f"[graph] rebuild failed: {e!r}", flush=True)
+
+
+_graph_lock, _graph_built = threading.Lock(), {}
+GRAPH_EVERY_S = 10
+
+
+def _rebuild_graph(scene_id: str) -> None:
+    """Refresh the place DAG (GET /cognitive-map) with the active harness policy, at most every GRAPH_EVERY_S."""
+    import harness, memory  # main's place graph
+    with _graph_lock:
+        if time.time() - _graph_built.get(scene_id, 0) < GRAPH_EVERY_S:
+            return
+        _graph_built[scene_id] = time.time()
+    policy = harness.active_policy()
+    memory.save_graph(memory.build_graph(memory.load_observations(scene_id), policy), policy, scene_id)
 
 
 async def ingest(obs_id: str) -> None:
