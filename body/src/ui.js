@@ -140,7 +140,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
         </div>
         <div class="chat-log" data-role="log"></div>
         <form class="chat-row" data-role="form">
-          <input type="text" data-role="input" placeholder="Talk to Seekr… (Enter)" autocomplete="off" />
+          <input type="text" data-role="input" placeholder="Talk to NavEvolve Agent… (Enter)" autocomplete="off" />
           <button type="submit">Send</button>
         </form>
       </div>

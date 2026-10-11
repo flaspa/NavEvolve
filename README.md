@@ -92,18 +92,18 @@ The policy uses only Gemini image/text embeddings and the splat range.
 Simulator pose is used only for display and to derive approximate evaluation
 labels (same viewpoint: ≤ 1.5 m and ≤ 45°; different: ≥ 3 m).
 
-## Talk to Seekr
+## Talk to the NavEvolve Agent
 
-Type in the **Talk** tab (or press Enter). Supported:
+Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent". Supported:
 
 | You say | Seekr does |
 |---|---|
 | `Seekr, what places do you remember?` | lists the cognitive map's places with their descriptions |
 | `Have you seen a dining table?` | searches stored Gemini descriptions; reports when/where, or "no memory" |
-| `Take me to the place where you saw the dining table.` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
+| `Take me to the place where you saw the dining table.` / `Go stand next to the big table` / `Find the dining table` / `Go to the table` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
 | `What do you see here?` | captures a view and reads back Gemini's description |
 | `Stop.` | halts the walk immediately; WASD is restored |
-| anything else | Gemini answers grounded only in matching memories |
+| anything else | Gemini classifies the intent (`POST /talk/intent`); if it is none of the above, Gemini answers grounded only in matching memories |
 
 ## Controls
 

@@ -23,12 +23,37 @@ VERIFY_PROMPT = (
 )
 
 ANSWER_PROMPT = (
-    "You are Seekr, an embodied agent that explores indoor spaces and remembers places. "
+    "You are the NavEvolve Agent, an embodied agent that explores indoor spaces and remembers places. "
     "Answer the user's question in one to three sentences, using ONLY the memories listed below "
     "(each is a real stored observation with its description). If the memories do not contain "
     "the answer, say you have no memory of it. Never invent places, objects or locations.\n\n"
     "Memories:\n{memories}\n\nUser: {question}"
 )
+
+
+INTENT_PROMPT = (
+    "Classify the user's instruction to an embodied indoor agent. Return JSON only: "
+    '{{"intent": one of "navigate" (go to / find / stand next to something), "have_seen" '
+    '(asks whether the agent has seen something), "list_places" (asks which places it remembers), '
+    '"describe_here" (asks what it sees now), "stop", or "chat"; '
+    '"target": the object or place named, as a short noun phrase, or "" }}. '
+    "Never invent a target that is not in the text.\n\nInstruction: {text}"
+)
+
+INTENTS = {"navigate", "have_seen", "list_places", "describe_here", "stop", "chat"}
+
+
+def intent(text: str) -> dict:
+    client = perception._client()
+    response = client.models.generate_content(
+        model=perception.VLM_MODEL,
+        contents=INTENT_PROMPT.format(text=text.replace("{", "(").replace("}", ")")),
+        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.0),
+    )
+    result = json.loads(response.text)
+    kind = str(result.get("intent", "chat"))
+    return {"intent": kind if kind in INTENTS else "chat", "target": str(result.get("target", ""))[:100],
+            "model": perception.VLM_MODEL}
 
 
 def verify(obs_id: str, goal: str) -> dict:

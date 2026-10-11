@@ -128,3 +128,12 @@ Milestone 6 — Talk to Seekr + memory-grounded navigation:
 - `body/src/ui.js`, `main.js`: Talk tab input, agent wiring, Enter hotkey.
 - `brain/talk.py`, `server.py`: `POST /talk/verify`, `POST /talk`,
   `POST /observations/{id}/enrich` (reuses the Milestone 3 pipeline).
+
+Conversational interface correction:
+- User-facing name is "NavEvolve Agent" (Talk tab, replies, Gemini persona);
+  project files and identifiers unchanged.
+- `talk.js`: navigation parsing by verb + filler stripping ("go stand next to
+  the big table" → "big table"), head-noun fallback that says when only a
+  looser memory matched, Gemini structured intent (`POST /talk/intent`) for
+  unfamiliar phrasing, and backend errors reported by endpoint instead of
+  "Not Found".

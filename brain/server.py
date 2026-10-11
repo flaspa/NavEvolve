@@ -24,6 +24,7 @@ Endpoints:
     POST /observations/{id}/enrich   Gemini description for one observation (perception.py)
     POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
     POST /talk             {question, memories[]} → Gemini answer grounded in those memories
+    POST /talk/intent      {text} → structured intent {intent, target} for unfamiliar phrasing
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -279,3 +280,15 @@ async def talk_answer(req: TalkRequest) -> dict:
         return await anyio.to_thread.run_sync(talk.answer, req.question, req.memories)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"talk failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class IntentRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=500)
+
+
+@app.post("/talk/intent")
+async def talk_intent(req: IntentRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(talk.intent, req.text)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"intent failed: {type(exc).__name__}: {exc}"[:300]) from exc
