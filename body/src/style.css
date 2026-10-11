@@ -1195,3 +1195,132 @@ body {
 .cognitive-map-empty {
   position: relative;
 }
+
+/* ── Place Memory Inspector (beside the sidebar; the map stays visible) ─── */
+#place-inspector {
+  position: fixed;
+  top: 12px;
+  right: 324px;
+  z-index: 11;
+  width: 300px;
+  max-width: calc(100vw - 360px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(14, 14, 18, 0.92);
+  backdrop-filter: blur(6px);
+  color: #e8e8ee;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: auto;
+}
+
+#place-inspector[hidden] {
+  display: none;
+}
+
+.pi-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pi-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pi-sub {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.pi-close {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ee;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pi-close:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pi-photo {
+  position: relative;
+  background: #050505;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pi-photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 768 / 419;
+  object-fit: cover;
+}
+
+.pi-photo-note {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 2px 6px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.pi-photo-note:empty {
+  display: none;
+}
+
+.pi-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+.pi-nav button {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ee;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pi-nav button:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.pi-nav button[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.pi-meta {
+  font: 10px/1.5 ui-monospace, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: pre-line;
+  word-break: break-all;
+}
+
+.pi-desc {
+  white-space: pre-line;
+  max-height: 160px;
+  overflow-y: auto;
+  color: rgba(255, 255, 255, 0.85);
+}

@@ -195,12 +195,15 @@ setInterval(pollBrainStatus, 10_000);
 const cognitiveMap = createCognitiveMap({
   mount: ui.cognitiveMapPanel,
   footer: ui.cognitiveMapFooter,
+  brainUrl: APP_CONFIG.brainUrl,
 });
 
 async function pollCognitiveMap() {
+  // Always scene-filtered: before the scene is active there is nothing to
+  // show, and an unfiltered graph from another scene would flash and vanish.
+  if (!activeScene) return;
   try {
-    const scene = activeScene ? `?scene_id=${encodeURIComponent(activeScene.id)}` : "";
-    const res = await fetchJson(`/cognitive-map${scene}`);
+    const res = await fetchJson(`/cognitive-map?scene_id=${encodeURIComponent(activeScene.id)}`);
     if (res.ok) cognitiveMap.update(res.body);
   } catch (_) {
     // Brain offline: keep the last drawing.
@@ -878,6 +881,7 @@ function trackTravelForAutoCapture() {
  */
 function activateScene(descriptor) {
   activeScene = descriptor;
+  pollCognitiveMap(); // show this scene's map now rather than at the next poll
 
   applySceneDescriptor(descriptor); // environment + visualOffset -> CONFIG
   applyEnvironmentTransform();
@@ -1176,6 +1180,7 @@ function buildControlPanel() {
 worldReady
   .then(async ({ collider, navmeshFloorProbe, scene: descriptor }) => {
     activeScene = descriptor;
+    pollCognitiveMap();
     applySceneDescriptor(descriptor);
     ui.setSceneName(descriptor.displayName ?? descriptor.id);
 
@@ -1363,6 +1368,7 @@ window.__seekr = {
     return lastEgoFrame;
   },
   captureObservation,
+  cognitiveMap,
   get player() {
     return player;
   },

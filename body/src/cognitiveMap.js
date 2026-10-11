@@ -1,13 +1,17 @@
 /**
- * cognitiveMap.js — renders the cognitive map (hackathon, Milestone 4).
+ * cognitiveMap.js — renders the cognitive map (hackathon, Milestones 4–5).
  *
  * Read-only view of GET /cognitive-map: place nodes (sized by observation
  * count) and traversal edges. Node positions come from each place's
  * display_xz — a display aid only; the matching policy never sees pose. The
  * physical NavMesh is deliberately NOT drawn here.
+ *
+ * Milestone 5: every node is clickable and opens the Place Memory Inspector,
+ * which browses that place's observations through the existing
+ * GET /observations/{id} and GET /observations/{id}/image.jpg endpoints.
  */
 
-export function createCognitiveMap({ mount, footer }) {
+export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
   mount.textContent = "";
   const canvas = document.createElement("canvas");
   canvas.className = "cognitive-map-canvas";
@@ -17,6 +21,9 @@ export function createCognitiveMap({ mount, footer }) {
   mount.append(canvas, empty);
 
   let lastGraph = null;
+  let hitTargets = []; // [{ place, x, y, r }] in CSS pixels, from the last draw
+  let hoveredId = null;
+  let selectedId = null;
 
   function draw(graph) {
     lastGraph = graph;
@@ -32,6 +39,7 @@ export function createCognitiveMap({ mount, footer }) {
     const ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
+    hitTargets = [];
     if (!places.length) return;
 
     const xs = places.map((p) => p.display_xz[0]);
@@ -63,6 +71,15 @@ export function createCognitiveMap({ mount, footer }) {
       const [x, y] = pos.get(p.place_id);
       const n = p.observation_ids.length;
       const r = 6 + Math.min(8, (n - 1) * 2.5);
+      hitTargets.push({ place: p, x, y, r: r + 3 });
+      const active = p.place_id === hoveredId || p.place_id === selectedId;
+      if (active) {
+        ctx.beginPath();
+        ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fillStyle = n > 1 ? "rgba(224, 196, 138, 0.95)" : "rgba(158, 203, 255, 0.9)";
@@ -71,6 +88,33 @@ export function createCognitiveMap({ mount, footer }) {
       ctx.fillText(String(n), x, y + 0.5);
     }
   }
+
+  function hitTest(event) {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    return hitTargets.find((t) => Math.hypot(t.x - x, t.y - y) <= t.r) ?? null;
+  }
+
+  canvas.addEventListener("mousemove", (event) => {
+    const hit = hitTest(event);
+    const id = hit?.place.place_id ?? null;
+    canvas.style.cursor = hit ? "pointer" : "";
+    if (id !== hoveredId) {
+      hoveredId = id;
+      draw(lastGraph);
+    }
+  });
+  canvas.addEventListener("mouseleave", () => {
+    if (hoveredId !== null) {
+      hoveredId = null;
+      draw(lastGraph);
+    }
+  });
+  canvas.addEventListener("click", (event) => {
+    const hit = hitTest(event);
+    if (hit) inspector.open(hit.place);
+  });
 
   function setFooter(data) {
     const g = data?.graph;
@@ -89,12 +133,186 @@ export function createCognitiveMap({ mount, footer }) {
     footer.harness.title = h.last_result ?? "";
   }
 
+  const inspector = createPlaceInspector({
+    brainUrl,
+    anchor: mount,
+    onClose: () => {
+      selectedId = null;
+      draw(lastGraph);
+    },
+  });
+
   window.addEventListener("resize", () => draw(lastGraph));
 
   return {
     update(data) {
       draw(data?.graph ?? null);
       setFooter(data);
+      // Keep an open inspector attached to the same place after a refresh.
+      if (selectedId) {
+        const place = (data?.graph?.places ?? []).find((p) => p.place_id === selectedId);
+        if (place) inspector.refresh(place);
+        else inspector.close();
+      }
     },
+    /** Opens the inspector for a place id (also used by the debug handle). */
+    openPlace(placeId) {
+      const place = (lastGraph?.places ?? []).find((p) => p.place_id === placeId);
+      if (place) inspector.open(place);
+      return Boolean(place);
+    },
+    /** Node hit targets from the last draw, in canvas CSS pixels (debug). */
+    hitTargets: () => hitTargets.map((t) => ({ place_id: t.place.place_id, x: t.x, y: t.y, r: t.r })),
   };
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Place Memory Inspector — a fixed panel beside the sidebar, so the map
+  // stays visible. Everything it shows comes from /observations/{id}.
+  // ─────────────────────────────────────────────────────────────────────────
+  function createPlaceInspector({ brainUrl, anchor, onClose }) {
+    const root = document.createElement("div");
+    root.id = "place-inspector";
+    root.hidden = true;
+    root.innerHTML = `
+      <div class="pi-head">
+        <div>
+          <div class="pi-title" data-role="title">Place</div>
+          <div class="pi-sub" data-role="subtitle"></div>
+        </div>
+        <button type="button" class="pi-close" data-role="close" title="Close">×</button>
+      </div>
+      <div class="pi-photo">
+        <img data-role="image" alt="Egocentric observation" />
+        <div class="pi-photo-note" data-role="photo-note"></div>
+      </div>
+      <div class="pi-nav">
+        <button type="button" data-role="prev" title="Previous observation">‹ Prev</button>
+        <span data-role="index"></span>
+        <button type="button" data-role="next" title="Next observation">Next ›</button>
+      </div>
+      <div class="pi-meta" data-role="meta"></div>
+      <div class="pi-desc" data-role="description"></div>`;
+    document.body.appendChild(root);
+
+    // The panel sits above the world canvas, so its clicks never reach the
+    // pointer-lock handler. Stop propagation as well, so no window-level
+    // listener can mistake them for scene input.
+    for (const type of ["mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu"]) {
+      root.addEventListener(type, (e) => e.stopPropagation());
+    }
+
+    const el = (role) => root.querySelector(`[data-role="${role}"]`);
+    const img = el("image");
+    const cache = new Map(); // observation id → metadata document
+    let place = null;
+    let index = 0;
+    let requestId = 0;
+
+    el("close").addEventListener("click", close);
+    el("prev").addEventListener("click", () => step(-1));
+    el("next").addEventListener("click", () => step(1));
+    img.addEventListener("error", () => {
+      el("photo-note").textContent = "Image unavailable";
+    });
+
+    function position() {
+      const rect = anchor.closest("#cognitive-map")?.getBoundingClientRect() ?? anchor.getBoundingClientRect();
+      const sidebar = document.getElementById("sidebar")?.getBoundingClientRect();
+      const right = sidebar ? window.innerWidth - sidebar.left + 10 : 324;
+      root.style.right = `${right}px`;
+      root.style.top = `${Math.max(12, Math.min(rect.top, window.innerHeight - root.offsetHeight - 12))}px`;
+    }
+
+    async function fetchObservation(id) {
+      if (cache.has(id)) return cache.get(id);
+      const response = await fetch(`${brainUrl}/observations/${encodeURIComponent(id)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const doc = await response.json();
+      cache.set(id, doc);
+      return doc;
+    }
+
+    function describe(doc) {
+      if (doc?.perception?.status !== "done") return "Not yet enriched.";
+      const d = doc.description;
+      if (d && typeof d === "object") {
+        const parts = [];
+        if (d.room_type) parts.push(`${d.room_type}`);
+        if (d.summary) parts.push(d.summary);
+        const landmarks = Array.isArray(d.landmarks) ? d.landmarks : [];
+        if (landmarks.length) parts.push(`Landmarks: ${landmarks.join("; ")}`);
+        if (parts.length) return parts.join("\n");
+      }
+      return doc.description_text || "Not yet enriched.";
+    }
+
+    async function show() {
+      const ids = place.observation_ids;
+      const id = ids[index];
+      const n = ids.length;
+      const myRequest = ++requestId;
+      el("title").textContent = `Place ${place.place_id}`;
+      el("subtitle").textContent = `${n} observation${n === 1 ? "" : "s"}`;
+      el("index").textContent = `${index + 1} / ${n}`;
+      el("prev").disabled = index === 0;
+      el("next").disabled = index >= n - 1;
+      el("photo-note").textContent = "";
+      img.src = `${brainUrl}/observations/${encodeURIComponent(id)}/image.jpg`;
+      el("meta").textContent = `Observation ${id}`;
+      el("description").textContent = "Loading…";
+      try {
+        const doc = await fetchObservation(id);
+        if (myRequest !== requestId) return; // superseded by a newer navigation
+        const range = doc.range?.distanceM;
+        const when = Number.isFinite(doc.timestamp) ? new Date(doc.timestamp).toLocaleTimeString() : "";
+        el("meta").textContent =
+          `Observation ${id}\nRange ${Number.isFinite(range) ? `${range.toFixed(2)} m` : "no surface"} ahead` +
+          `${when ? ` · ${when}` : ""}${doc.trigger ? ` · ${doc.trigger}` : ""}`;
+        el("description").textContent = describe(doc);
+      } catch (err) {
+        if (myRequest !== requestId) return;
+        el("description").textContent = `Could not load observation — ${err.message}`;
+      }
+      position();
+    }
+
+    function step(delta) {
+      const next = index + delta;
+      if (!place || next < 0 || next >= place.observation_ids.length) return;
+      index = next;
+      show();
+    }
+
+    function open(nextPlace) {
+      const samePlace = place?.place_id === nextPlace.place_id;
+      place = nextPlace;
+      if (!samePlace) index = 0;
+      selectedId = place.place_id;
+      root.hidden = false;
+      draw(lastGraph);
+      show();
+    }
+
+    function refresh(nextPlace) {
+      place = nextPlace;
+      index = Math.min(index, place.observation_ids.length - 1);
+      show();
+    }
+
+    function close() {
+      if (root.hidden) return;
+      root.hidden = true;
+      place = null;
+      onClose();
+    }
+
+    window.addEventListener("resize", () => {
+      if (!root.hidden) position();
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "Escape" && !root.hidden) close();
+    });
+
+    return { open, refresh, close };
+  }
 }

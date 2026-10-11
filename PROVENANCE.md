@@ -108,3 +108,12 @@ Milestone 4 refinement:
   the result says explicitly when no held-out improvement is demonstrated.
 - `body/src/cognitiveMap.js`: the footer names the active policy, the metric
   and the baseline version it is compared against.
+
+Milestone 5 — Place Memory Inspector:
+- `body/src/cognitiveMap.js`: nodes are hoverable and clickable; clicking opens
+  an inspector beside the sidebar that browses the place's observations
+  (photo from `GET /observations/{id}/image.jpg`, metadata and Gemini
+  description from `GET /observations/{id}`), with Prev/Next and Close.
+  Clicks on the inspector never reach the scene or pointer lock.
+- `body/src/main.js`: the Cognitive Map poll is always scene-filtered and
+  refreshes when a scene activates.
