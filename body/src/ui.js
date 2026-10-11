@@ -3,11 +3,11 @@
  *
  * Layout:
  *   - Top-left HUD: status, live position, view-mode buttons, controls help
- *   - Right sidebar: minimap (top) + tabs (Controls / Cognitive Map / Log)
+ *   - Right sidebar: minimap, Cognitive Map panel, tabs (Controls / Log)
  *
  * The Controls tab is populated by main.js via buildControls(schema) so all
  * bindings (CONFIG ↔ scene) stay in one place. The Log tab shows system
- * messages; Cognitive Map is reserved for the next milestone.
+ * messages. The Cognitive Map panel is a placeholder for the next milestone.
  */
 import {
   formatFloorplanPosition,
@@ -115,19 +115,20 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   sidebar.id = "sidebar";
   sidebar.innerHTML = `
     <div data-role="minimap-mount"></div>
+    <div id="cognitive-map" data-role="cognitive-map">
+      <span class="minimap-label">COGNITIVE MAP</span>
+      <div class="cognitive-map-body" data-role="cognitive-map-body">Awaiting observations</div>
+      <div class="cognitive-map-footer">
+        <span data-role="policy-version">Policy: —</span>
+        <span data-role="harness-status">Harness: idle</span>
+      </div>
+    </div>
     <div class="panel">
       <div class="panel-tabs">
         <button type="button" data-tab="controls" class="active">Controls</button>
-        <button type="button" data-tab="cognitive-map">Cognitive Map</button>
         <button type="button" data-tab="chat">Log</button>
       </div>
       <div class="panel-body" data-tab-panel="controls"></div>
-      <div class="panel-body hidden" data-tab-panel="cognitive-map">
-        <div class="cognitive-map-placeholder">
-          Cognitive Map — the persistent graph of places Seekr has visited
-          (MongoDB). Coming in the next milestone.
-        </div>
-      </div>
       <div class="panel-body hidden" data-tab-panel="chat">
         <div class="chat-tools">
           <button type="button" class="chat-copy" data-role="copy-chat"
@@ -203,7 +204,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const minimapMount = sidebar.querySelector('[data-role="minimap-mount"]');
   const tabButtons = [...sidebar.querySelectorAll(".panel-tabs button")];
   const tabPanels = [...sidebar.querySelectorAll("[data-tab-panel]")];
-  const cognitiveMapPanel = sidebar.querySelector('[data-tab-panel="cognitive-map"]');
+  const cognitiveMapPanel = sidebar.querySelector('[data-role="cognitive-map-body"]');
 
   /**
    * Chat speakers that get their own styling.
@@ -803,7 +804,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
     minimapMount,
 
-    /** Reserved for the Cognitive Map view (next milestone). */
+    /** Body of the Cognitive Map panel below the minimap (next milestone). */
     cognitiveMapPanel,
 
     buildControls,

@@ -1137,10 +1137,34 @@ body {
   white-space: nowrap;
 }
 
-/* ── Cognitive Map tab (placeholder; next milestone) ────────────────────── */
-.cognitive-map-placeholder {
-  padding: 16px 4px;
-  color: rgba(255, 255, 255, 0.6);
+/* ── Cognitive Map panel (placeholder; next milestone) ──────────────────── */
+#cognitive-map {
+  position: relative;
+  flex-shrink: 0;
+  height: 170px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(20, 22, 28, 0.82);
+  overflow: hidden;
+}
+
+.cognitive-map-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
-  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.cognitive-map-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.55);
 }
