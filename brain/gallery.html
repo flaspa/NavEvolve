@@ -12,7 +12,11 @@
            padding: 12px 16px; background: rgba(21, 22, 26, 0.95); border-bottom: 1px solid #2a2c33; }
   h1 { margin: 0; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
   #count { color: var(--dim); }
-  button { margin-left: auto; padding: 6px 14px; border: 1px solid #3a3d46; border-radius: 6px;
+  .controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  select { padding: 5px 8px; border: 1px solid #3a3d46; border-radius: 6px; background: #22242b; color: var(--ink); }
+  #session { color: var(--dim); font: 11px ui-monospace, Consolas, monospace; }
+  button.danger { border-color: #6b2b2b; color: #ffb4b4; }
+  button { padding: 6px 14px; border: 1px solid #3a3d46; border-radius: 6px;
            background: #22242b; color: var(--ink); cursor: pointer; }
   button:hover { background: #2c2f38; }
   #sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; padding: 16px; }
@@ -38,7 +42,13 @@
 <header>
   <h1>Observation Gallery</h1>
   <span id="count">Loading…</span>
-  <button id="refresh" type="button">Refresh</button>
+  <div class="controls">
+    <span id="session"></span>
+    <button id="new-session" type="button" title="Start a fresh capture run; existing observations are kept">New Session</button>
+    <select id="scene" title="Scene shown and cleared"><option value="">All scenes</option></select>
+    <button id="clear" type="button" class="danger">Clear Observations</button>
+    <button id="refresh" type="button">Refresh</button>
+  </div>
 </header>
 <main id="sheet"></main>
 <div id="lightbox"><img alt="Observation" /><div id="lightbox-caption"></div></div>
@@ -49,6 +59,15 @@
   const lightbox = document.getElementById("lightbox");
   const lightboxImg = lightbox.querySelector("img");
   const lightboxCaption = document.getElementById("lightbox-caption");
+  const sessionEl = document.getElementById("session");
+  const sceneSelect = document.getElementById("scene");
+
+  function renderScenes(scenes, allTotal) {
+    const selected = sceneSelect.value;
+    sceneSelect.replaceChildren(new Option(`All scenes (${allTotal})`, ""));
+    for (const { scene_id, count } of scenes) sceneSelect.append(new Option(`${scene_id} (${count})`, scene_id));
+    sceneSelect.value = scenes.some((s) => s.scene_id === selected) ? selected : "";
+  }
 
   function fmtTime(ms) {
     return Number.isFinite(ms) ? new Date(ms).toLocaleString() : "—";
@@ -67,11 +86,15 @@
   async function load() {
     countEl.textContent = "Loading…";
     try {
-      const res = await fetch("/observations?limit=100");
+      const scene = sceneSelect.value;
+      const res = await fetch(`/observations?limit=100${scene ? `&scene_id=${encodeURIComponent(scene)}` : ""}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail ?? `HTTP ${res.status}`);
       const shown = data.items.length;
-      countEl.textContent = `${data.total} observations in MongoDB${shown < data.total ? ` · newest ${shown} shown` : ""}`;
+      renderScenes(data.scenes, data.all_total);
+      sessionEl.textContent = `Session ${data.session_id} · ${data.session_total} captured`;
+      const where = sceneSelect.value ? ` in ${sceneSelect.value}` : "";
+      countEl.textContent = `${data.total} observations${where} · ${data.all_total} in MongoDB${shown < data.total ? ` · newest ${shown} shown` : ""}`;
       sheet.replaceChildren();
       if (!shown) sheet.append(text("div", "empty", "No observations yet — walk around or press C in NavEvolve."));
       data.items.forEach((obs, i) => {
@@ -109,6 +132,29 @@
   lightbox.addEventListener("click", () => lightbox.classList.remove("open"));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") lightbox.classList.remove("open"); });
   document.getElementById("refresh").addEventListener("click", load);
+  sceneSelect.addEventListener("change", load);
+
+  document.getElementById("new-session").addEventListener("click", async () => {
+    const res = await fetch("/sessions", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) return alert(`New session failed — ${data?.detail ?? res.status}`);
+    load();
+  });
+
+  document.getElementById("clear").addEventListener("click", async () => {
+    const scene = sceneSelect.value;
+    const q = scene ? `&scene_id=${encodeURIComponent(scene)}` : "";
+    const count = (await (await fetch(`/observations?limit=1${q}`)).json()).total;
+    if (!count) return alert("Nothing to delete.");
+    const what = scene ? `scene ${scene}` : "ALL scenes";
+    if (!confirm(`Permanently delete ${count} observation${count === 1 ? "" : "s"} from ${what}?
+
+Only the observations collection is affected.`)) return;
+    const res = await fetch(`/observations?expected=${count}${q}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) alert(`Clear failed — ${data?.detail ?? res.status}`);
+    load();
+  });
   load();
 </script>
 </body>

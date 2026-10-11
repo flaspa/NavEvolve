@@ -68,3 +68,10 @@ Observation Gallery:
   with a lightbox. It reads the existing `/observations` endpoints, so storage
   is unchanged.
 - `body/src/ui.js`: "Observation Gallery ↗" link in the HUD.
+
+Observation reset controls:
+- `capture_sessions` collection and `POST /sessions`. Each new observation is
+  tagged with the current `session_id`. The HUD and gallery show session and
+  total counts.
+- `DELETE /observations`: deletes documents in `observations` only, for one
+  scene or all. Local development only, and protected by a confirmed-count check.

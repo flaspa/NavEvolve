@@ -19,6 +19,8 @@ Endpoints:
     GET  /observations/{id}            metadata
     GET  /observations/{id}/image.jpg  the stored JPEG
     GET  /gallery          contact-sheet view of stored observations
+    POST /sessions         start a new capture session (observations kept)
+    DELETE /observations   local dev only: delete one scene's or all observations
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from pathlib import Path
 
 import anyio
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,10 +126,19 @@ async def create_observation(obs: Observation) -> dict:
     doc = obs.model_dump(exclude={"image_data_url"})
     try:
         obs_id = await anyio.to_thread.run_sync(db.insert_observation, doc, jpeg)
-        total = await anyio.to_thread.run_sync(db.count_observations, None)
+        counts = await anyio.to_thread.run_sync(_counts)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
-    return {"ok": True, "id": obs_id, "image_bytes": len(jpeg), "total": total}
+    return {"ok": True, "id": obs_id, "image_bytes": len(jpeg), **counts}
+
+
+def _counts() -> dict:
+    session_id = db.current_session()
+    return {
+        "total": db.count_observations(),
+        "session_id": session_id,
+        "session_total": db.count_observations(session_id=session_id),
+    }
 
 
 @app.get("/observations")
@@ -135,9 +146,11 @@ async def recent_observations(scene_id: str | None = None, limit: int = 20) -> d
     try:
         items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 100))
         total = await anyio.to_thread.run_sync(db.count_observations, scene_id)
+        counts = await anyio.to_thread.run_sync(_counts)
+        scenes = await anyio.to_thread.run_sync(db.scene_counts)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
-    return {"total": total, "items": items}
+    return {**counts, "total": total, "all_total": counts["total"], "scenes": scenes, "items": items}
 
 
 @app.get("/observations/{obs_id}")
@@ -160,3 +173,45 @@ async def observation_image(obs_id: str) -> Response:
 async def gallery() -> FileResponse:
     """Static contact sheet; it reads the two observation endpoints above."""
     return FileResponse(_HERE / "gallery.html", media_type="text/html")
+
+
+@app.post("/sessions")
+async def start_session() -> dict:
+    try:
+        session_id = await anyio.to_thread.run_sync(db.new_session)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"ok": True, "session_id": session_id}
+
+
+_LOOPBACK = {"127.0.0.1", "::1"}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+
+
+def _require_local_dev(request: Request) -> None:
+    """Destructive endpoints answer only loopback clients addressing localhost,
+    and only while ALLOW_DEV_DELETE is not "0". Never expose this publicly."""
+    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
+    client = request.client.host if request.client else ""
+    if os.environ.get("ALLOW_DEV_DELETE", "1") == "0" or client not in _LOOPBACK or host not in _LOCAL_HOSTS:
+        raise HTTPException(status_code=403, detail="deletion is restricted to local development")
+
+
+@app.delete("/observations")
+async def clear_observations(request: Request, expected: int, scene_id: str | None = None) -> dict:
+    """Deletes documents in the observations collection only (one scene or all).
+
+    `expected` must equal the current count the user confirmed, so a stale
+    confirmation can never delete more than was shown.
+    """
+    _require_local_dev(request)
+    try:
+        current = await anyio.to_thread.run_sync(db.count_observations, scene_id)
+        if current != expected:
+            raise HTTPException(status_code=409, detail=f"count changed: {current} now, {expected} confirmed")
+        deleted = await anyio.to_thread.run_sync(db.delete_observations, scene_id)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"ok": True, "deleted": deleted, "scene_id": scene_id}

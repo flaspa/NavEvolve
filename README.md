@@ -42,7 +42,9 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `POST /observations` | store an ego JPEG + pose + camera snapshot + splat range |
 | `GET /observations` | recent observations (metadata) and total |
 | `GET /observations/{id}/image.jpg` | the stored JPEG |
-| `GET /gallery` | contact-sheet gallery of stored observations (also linked from the HUD) |
+| `GET /gallery` | contact-sheet gallery of stored observations (also linked from the HUD), with New Session / Clear Observations |
+| `POST /sessions` | start a new capture session (observations kept) |
+| `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
 
 **Frontend** — http://localhost:5000
 

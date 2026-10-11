@@ -18,6 +18,7 @@ from pymongo.database import Database
 
 TEST_COLLECTION = "navevolve_healthcheck"
 OBSERVATIONS = "observations"
+SESSIONS = "capture_sessions"
 
 _client: MongoClient | None = None
 
@@ -66,10 +67,24 @@ def roundtrip() -> dict:
     }
 
 
+def current_session() -> str:
+    """Id of the active capture session (the newest), created on first use."""
+    latest = get_db()[SESSIONS].find_one(sort=[("started_at", DESCENDING)])
+    return latest["session_id"] if latest else new_session()
+
+
+def new_session() -> str:
+    """Starts a fresh capture run. Existing observations are kept."""
+    now = datetime.now(timezone.utc)
+    session_id = now.strftime("s-%Y%m%d-%H%M%S-") + f"{now.microsecond // 1000:03d}"
+    get_db()[SESSIONS].insert_one({"session_id": session_id, "started_at": now})
+    return session_id
+
+
 def insert_observation(doc: dict, jpeg: bytes) -> str:
     """Stores one egocentric observation; the JPEG is kept as BSON binary."""
-    record = {**doc, "image_jpeg": Binary(jpeg), "image_bytes": len(jpeg),
-              "stored_at": datetime.now(timezone.utc)}
+    record = {**doc, "session_id": current_session(), "image_jpeg": Binary(jpeg),
+              "image_bytes": len(jpeg), "stored_at": datetime.now(timezone.utc)}
     return str(get_db()[OBSERVATIONS].insert_one(record).inserted_id)
 
 
@@ -82,9 +97,22 @@ def _public(doc: dict) -> dict:
     return doc
 
 
-def count_observations(scene_id: str | None = None) -> int:
+def count_observations(scene_id: str | None = None, session_id: str | None = None) -> int:
     query = {"scene_id": scene_id} if scene_id else {}
+    if session_id:
+        query["session_id"] = session_id
     return get_db()[OBSERVATIONS].count_documents(query)
+
+
+def scene_counts() -> list[dict]:
+    pipeline = [{"$group": {"_id": "$scene_id", "count": {"$sum": 1}}}, {"$sort": {"_id": 1}}]
+    return [{"scene_id": d["_id"], "count": d["count"]} for d in get_db()[OBSERVATIONS].aggregate(pipeline)]
+
+
+def delete_observations(scene_id: str | None = None) -> int:
+    """Deletes observation documents only — one scene, or all when scene_id is None."""
+    query = {"scene_id": scene_id} if scene_id else {}
+    return get_db()[OBSERVATIONS].delete_many(query).deleted_count
 
 
 def list_observations(scene_id: str | None = None, limit: int = 20) -> list[dict]:

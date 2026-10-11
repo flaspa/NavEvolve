@@ -168,10 +168,12 @@ async function pollBrainStatus() {
   try {
     await fetchJson("/health");
     const db = await fetchJson("/db/health");
-    if (db.ok && sessionCaptures === 0) {
+    if (db.ok) {
+      // Keeps the counter right after a New Session or Clear in the gallery.
       const obs = await fetchJson("/observations?limit=1");
       if (obs.ok) {
-        observationCount = obs.body.total;
+        observationCount = obs.body.all_total ?? obs.body.total;
+        sessionCaptures = obs.body.session_total ?? sessionCaptures;
         showCaptureCount();
       }
     }
@@ -823,7 +825,7 @@ async function captureObservation(trigger = "manual") {
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
-    sessionCaptures += 1;
+    sessionCaptures = body.session_total ?? sessionCaptures + 1;
     observationCount = body.total;
     const dist = range.distanceM === null ? "no surface" : `${range.distanceM.toFixed(2)} m ahead`;
     showCaptureCount(dist);
