@@ -9,9 +9,10 @@ One run:
      a frozen held-out set (memory.split_pairs).
   3. Generate candidate policies: a coarse grid over weights × threshold, then
      a local refinement around the best coarse candidate.
-  4. Score every candidate on the SELECTION pairs only.
-  5. Adopt the best candidate only if its selection score beats the active
-     policy's; report held-out scores before/after without using them to choose.
+  4. Score every candidate on the SELECTION pairs only, by revisit-pair F1
+     (penalises false merges; balanced accuracy hid them behind class imbalance).
+  5. Adopt the best candidate only if its selection F1 beats the baseline
+     policy's; evaluate held-out ONCE afterwards, never to choose.
   6. Persist the policy version, metrics and run history in MongoDB.
   7. Rebuild and persist the cognitive graph with the (possibly new) policy.
 
@@ -38,10 +39,15 @@ from memory import Policy  # noqa: E402
 POLICIES = "harness_policies"
 RUNS = "harness_runs"
 MIN_REVISITS = 2  # per split; fewer means the data cannot support a claim
+# Policy-selection objective. "f1" (revisit-pair F1) is the default: it
+# penalises false merges. "balanced_accuracy" was used by the first run and
+# rewarded over-merging; it remains available only to reproduce that record.
+OBJECTIVES = {"f1": "revisit F1", "balanced_accuracy": "balanced accuracy"}
 
 
-def active_policy() -> Policy:
-    doc = db.get_db()[POLICIES].find_one(sort=[("version", -1)])
+def active_policy(version: int | None = None) -> Policy:
+    query = {"version": version} if version else {}
+    doc = db.get_db()[POLICIES].find_one(query, sort=[("version", -1)])
     if doc is None:
         policy = Policy()
         db.get_db()[POLICIES].insert_one({**policy.as_dict(), "parent": None, "adopted_at":
@@ -82,7 +88,7 @@ def _distance(a: Policy, b: Policy) -> float:
         abs(a.w_range - b.w_range) + abs(a.threshold - b.threshold)
 
 
-def run(scene_id: str | None = None) -> dict:
+def run(scene_id: str | None = None, objective: str = "f1", from_version: int | None = None) -> dict:
     observations = memory.load_observations(scene_id)
     if not scene_id:
         counts: dict[str, int] = {}
@@ -96,12 +102,13 @@ def run(scene_id: str | None = None) -> dict:
     _set_status("running", scene_id=scene_id)
     pairs = memory.reference_pairs(observations)
     selection, held_out = memory.split_pairs(pairs)
-    current = active_policy()
+    current = active_policy(from_version)
+    objective_of = lambda m: m[objective]  # noqa: E731
 
     graph_v1 = memory.build_graph(observations, current)
     sel_before, held_before = memory.evaluate(graph_v1, selection), memory.evaluate(graph_v1, held_out)
 
-    report = {"scene_id": scene_id, "observations": len(observations),
+    report = {"scene_id": scene_id, "observations": len(observations), "objective": objective,
               "reference_pairs": {"selection": len(selection), "held_out": len(held_out),
                                   "revisits_selection": sel_before["revisits"],
                                   "revisits_held_out": held_before["revisits"]},
@@ -117,16 +124,17 @@ def run(scene_id: str | None = None) -> dict:
     # 3–4. Generate and score candidates on the selection pairs only.
     scored = []
     for cand in candidates_coarse():
-        scored.append((memory.evaluate(memory.build_graph(observations, cand), selection)["score"], cand))
+        scored.append((objective_of(memory.evaluate(memory.build_graph(observations, cand), selection)) or 0, cand))
     best_coarse = max(scored, key=lambda s: (s[0], -_distance(s[1], current)))[1]
     for cand in candidates_local(best_coarse):
-        scored.append((memory.evaluate(memory.build_graph(observations, cand), selection)["score"], cand))
+        scored.append((objective_of(memory.evaluate(memory.build_graph(observations, cand), selection)) or 0, cand))
     best_score, best = max(scored, key=lambda s: (s[0], -_distance(s[1], current)))
     report["candidates_evaluated"] = len(scored)
 
     # 5. Adopt only on a strict improvement of the selection score.
-    adopted = best_score > sel_before["score"]
-    new_policy = Policy(current.version + 1, best.w_visual, best.w_semantic, best.w_range,
+    adopted = best_score > (objective_of(sel_before) or 0)
+    next_version = (db.get_db()[POLICIES].find_one(sort=[("version", -1)]) or {"version": 0})["version"] + 1
+    new_policy = Policy(next_version, best.w_visual, best.w_semantic, best.w_range,
                         best.threshold) if adopted else current
     graph_v2 = memory.build_graph(observations, new_policy)
     sel_after, held_after = memory.evaluate(graph_v2, selection), memory.evaluate(graph_v2, held_out)
@@ -139,16 +147,25 @@ def run(scene_id: str | None = None) -> dict:
     if adopted:
         db.get_db()[POLICIES].insert_one({
             **new_policy.as_dict(), "parent": current.version, "adopted_at": datetime.now(timezone.utc),
-            "selection_score": sel_after["score"], "held_out_score": held_after["score"],
-            "rationale": f"selection score {sel_before['score']} → {sel_after['score']} "
-                         f"over {len(scored)} candidates"})
-    report["result"] = "improved" if adopted else "no candidate beat the active policy"
+            "objective": objective, "selection_score": objective_of(sel_after),
+            "held_out_score": objective_of(held_after), "held_out": _brief(held_after),
+            "rationale": f"selection {OBJECTIVES[objective]} {objective_of(sel_before)} → "
+                         f"{objective_of(sel_after)} over {len(scored)} candidates"})
+    improved_held_out = adopted and (objective_of(held_after) or 0) > (objective_of(held_before) or 0)
+    report["held_out_improved"] = improved_held_out
+    if not adopted:
+        report["result"] = "no candidate beat the baseline policy on the selection split"
+    elif improved_held_out:
+        report["result"] = f"held-out {OBJECTIVES[objective]} improved"
+    else:
+        report["result"] = f"No demonstrated held-out {OBJECTIVES[objective]} improvement."
     _finish(report, new_policy, graph_v2, observations, scene_id, adopted)
     return report
 
 
 def _brief(m: dict) -> dict:
-    return {k: m[k] for k in ("score", "revisits", "missed_revisits", "distinct", "false_merges")}
+    return {k: m[k] for k in ("f1", "precision", "recall", "balanced_accuracy", "revisits",
+                              "missed_revisits", "distinct", "false_merges")}
 
 
 def _same(graph: dict, p: dict) -> bool:
@@ -169,17 +186,21 @@ def _finish(report: dict, policy: Policy, graph: dict, observations: list, scene
     report["edges"] = len(graph["edges"])
     db.get_db()[RUNS].insert_one({**report, "ran_at": datetime.now(timezone.utc)})
     report.pop("_id", None)
+    after = (report.get("after") or report["before"])["held_out"]
     _set_status("idle", scene_id=scene_id, last_result=report["result"], policy_version=policy.version,
-                score_before=report["before"]["held_out"]["score"],
-                score_after=(report.get("after") or report["before"])["held_out"]["score"],
-                places=report["places"])
+                baseline_version=report["policy_before"]["version"],
+                objective=report["objective"], metric_label=f"held-out {OBJECTIVES[report['objective']]}",
+                score_before=report["before"]["held_out"][report["objective"]],
+                score_after=after[report["objective"]], places=report["places"])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NavEvolve recursive harness run")
     parser.add_argument("--scene")
+    parser.add_argument("--objective", choices=sorted(OBJECTIVES), default="f1")
+    parser.add_argument("--from-version", type=int, help="baseline policy version (default: newest)")
     parser.add_argument("--reset", action="store_true", help="discard adopted policies; restart at v1")
     args = parser.parse_args()
     if args.reset:
         db.get_db()[POLICIES].delete_many({})
-    print(json.dumps(run(args.scene), indent=2, default=str))
+    print(json.dumps(run(args.scene, args.objective, args.from_version), indent=2, default=str))

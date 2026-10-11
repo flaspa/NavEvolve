@@ -75,12 +75,16 @@ export function createCognitiveMap({ mount, footer }) {
   function setFooter(data) {
     const g = data?.graph;
     const h = data?.harness ?? {};
+    // The graph's policy is the one that built the displayed map; the metric
+    // label names exactly what the harness measured (e.g. "held-out revisit F1").
     const version = g?.policy?.version;
-    const before = h.score_before;
-    const after = h.score_after;
     const fmt = (v) => (Number.isFinite(v) ? v.toFixed(2) : "—");
+    const baseline = h.baseline_version ? `v${h.baseline_version}` : "before";
+    const metric = h.metric_label ?? "score";
     footer.policy.textContent =
-      `Policy: ${version ? `v${version}` : "—"} · score ${fmt(before)}→${fmt(after)} · ${g?.places?.length ?? 0} places`;
+      `Active policy: ${version ? `v${version}` : "—"} · ${metric}: ${baseline} ${fmt(h.score_before)} → ` +
+      `${version ? `v${version}` : "after"} ${fmt(h.score_after)} · ${g?.places?.length ?? 0} places`;
+    footer.policy.title = h.last_result ?? "";
     footer.harness.textContent = `Harness: ${h.status ?? "idle"}`;
     footer.harness.title = h.last_result ?? "";
   }

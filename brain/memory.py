@@ -168,7 +168,7 @@ def split_pairs(pairs: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 def evaluate(graph: dict, pairs: list[dict]) -> dict:
-    """Balanced accuracy over revisit (same) and distinct (different) pairs."""
+    """Revisit-pair precision/recall/F1 plus balanced accuracy over labelled pairs."""
     assign = graph["assignment"]
     tp = fn = tn = fp = 0
     missed, merged = [], []
@@ -187,10 +187,18 @@ def evaluate(graph: dict, pairs: list[dict]) -> dict:
             else:
                 tn += 1
     recall = tp / (tp + fn) if tp + fn else None
+    precision = tp / (tp + fp) if tp + fp else None
     specificity = tn / (tn + fp) if tn + fp else None
     parts = [x for x in (recall, specificity) if x is not None]
+    f1 = 2 * tp / (2 * tp + fn + fp) if tp + fn + fp else None
     return {
-        "score": round(sum(parts) / len(parts), 4) if parts else None,
+        # Revisit-pair F1 is the primary objective: it penalises false merges,
+        # which balanced accuracy hides behind the many distinct pairs.
+        "f1": round(f1, 4) if f1 is not None else None,
+        "precision": round(precision, 4) if precision is not None else None,
+        "recall": round(recall, 4) if recall is not None else None,
+        "balanced_accuracy": round(sum(parts) / len(parts), 4) if parts else None,
+        "score": round(sum(parts) / len(parts), 4) if parts else None,  # legacy: balanced accuracy
         "revisit_recall": recall, "distinct_specificity": specificity,
         "revisits": tp + fn, "missed_revisits": fn, "distinct": tn + fp, "false_merges": fp,
         "missed": missed, "false_merged": merged,

@@ -78,6 +78,13 @@ cd brain
 .venv/Scripts/python harness.py           # each run may adopt the next version
 ```
 
+Policy selection uses **revisit-pair F1** on the selection split (it
+penalises false merges); the frozen held-out split is evaluated once per run
+and reported, never used to choose. The first run used balanced accuracy,
+which rewarded over-merging (v2); that record is kept in `harness_runs`.
+`--objective balanced_accuracy` reproduces it; `--from-version N` picks the
+baseline policy.
+
 The policy uses only Gemini image/text embeddings and the splat range.
 Simulator pose is used only for display and to derive approximate evaluation
 labels (same viewpoint: ≤ 1.5 m and ≤ 45°; different: ≥ 3 m).

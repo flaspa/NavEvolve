@@ -99,3 +99,12 @@ Milestone 4 — cognitive map and self-improving harness:
 - `brain/server.py`: `GET /cognitive-map`. `body/src/cognitiveMap.js` draws
   the places and edges, and shows policy, score, place count and harness
   status in the panel footer.
+
+Milestone 4 refinement:
+- `brain/memory.py`: `evaluate()` reports revisit-pair precision, recall and
+  F1 alongside balanced accuracy.
+- `brain/harness.py`: F1 is the policy-selection objective (balanced accuracy
+  kept as an option for the historical v2 run); held-out is evaluated once and
+  the result says explicitly when no held-out improvement is demonstrated.
+- `body/src/cognitiveMap.js`: the footer names the active policy, the metric
+  and the baseline version it is compared against.
