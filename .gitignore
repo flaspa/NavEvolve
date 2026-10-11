@@ -14,6 +14,10 @@ local-worlds/
 *.ksplat
 *.navmesh
 
+# Additional Gaussian Splat formats
+*.sog
+*.sog.*
+
 # Node / Vite
 node_modules/
 dist/

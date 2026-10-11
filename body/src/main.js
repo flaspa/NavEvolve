@@ -1,20 +1,16 @@
 /**
- * main.js — Seekr Body entry point.
+ * main.js — NavEvolve Body entry point.
  *
- * Wires the proven modules together: Spark world + NavMesh layer (world.js),
- * avatar + locomotion (avatar.js, player.js), HUD/sidebar (ui.js), minimap,
- * egocentric capture (frameCapture.js), the SEEKR VISION panel and the
- * Memories tab, and the HTTP client for the Seekr Brain (perceptionClient.js),
- * whose perception model is Liquid AI LFM2.5-VL-3B.
+ * Wires the pre-hackathon Seekr Body modules together: Spark world + NavMesh
+ * layer (world.js), avatar + locomotion (avatar.js, player.js), HUD/sidebar
+ * (ui.js), minimap, and egocentric capture (frameCapture.js). The Brain is
+ * polled only for its health and MongoDB status (brain/server.py).
  *
- * Scenes are the Habitat-GS (InteriorGS) validation scenes. Each is described
- * by its own scene.seekr.json (sceneProfile.js): assets, environment
- * transform, visualOffset and defaultStart. They ship NO collision mesh: the
- * NavMesh is the walkability authority, and ordinary WASD locomotion is
- * constrained to it (navmeshLocomotion.js through player.js).
- *
- * The Brain itself is not part of this milestone: the transport connects and
- * reports its state, chat is preserved, and commands are only logged.
+ * Scenes are Habitat-GS (InteriorGS) validation scenes. Each is described by
+ * its own scene.seekr.json (sceneProfile.js): assets, environment transform,
+ * visualOffset and defaultStart. They ship NO collision mesh: the NavMesh is
+ * the walkability authority, and WASD locomotion is constrained to it
+ * (navmeshLocomotion.js through player.js).
  */
 import "./style.css";
 import * as THREE from "three";
@@ -69,22 +65,9 @@ import {
 import { loadSceneProfile } from "./sceneProfile.js";
 import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
-import { createPerceptionClient } from "./perceptionClient.js";
-import { getOrCreateSessionId } from "./sessionId.js";
-import { createSeekrVision, PERCEPTION_MODEL_LABEL } from "./seekrVision.js";
-import { createPerceptionTab } from "./perceptionTab.js";
-import { encodeEgoClip } from "./egoClip.js";
-import { createDiscoverTab } from "./discoverTab.js";
-import { createPostcardModal } from "./postcardModal.js";
-import {
-  createGoalNavigator,
-  isNavigationGoal,
-  isStopCommand,
-} from "./goalNavigation.js";
-import { createMemories } from "./memories.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
-console.log("[Seekr Worlds build] BODY-M2-HABITAT-GS");
+console.log("[NavEvolve] Body");
 
 // ---------------------------------------------------------------------------
 // Runtime configuration — populates the Controls panel. Scene calibration is
@@ -136,19 +119,14 @@ const CONFIG = {
     extent: 8,
   },
 
-  vision: {
-    // Live SEEKR VISION refresh: an ego frame is captured this often while
-    // Seekr has actually moved or turned since the previous capture.
-    liveIntervalMs: 1500,
-    minMoveM: 0.05,
-    minTurnDeg: 2,
+  capture: {
+    // Egocentric frame encoding (captureEgo).
     quality: 0.7,
     maxWidth: 768,
   },
 };
 
 const AVATAR_URL = "/avatar/human.glb";
-const BRAIN_SESSION_ID = getOrCreateSessionId();
 
 function applySceneDescriptor(descriptor) {
   const env = CONFIG.environment;
@@ -162,148 +140,44 @@ function applySceneDescriptor(descriptor) {
 // ---------------------------------------------------------------------------
 // Interface
 // ---------------------------------------------------------------------------
-const ui = createUI({ title: "Seekr World" });
-
-const vision = createSeekrVision({
-  mount: ui.visionMount,
-  onAnalyze: () => analyzeVision(),
-});
+const ui = createUI({ title: "NavEvolve" });
 
 const minimap = createMinimap({
   mount: ui.minimapMount,
   extent: CONFIG.minimap.extent,
 });
 
-const postcardModal = createPostcardModal();
-
-/**
- * Create Postcard: 1–3 LOCAL memory ego frames (the thumbnails, whatever
- * their Memories.ai status) → Brain → BFL FLUX.2 [pro] → modal. The latest
- * Nimble Discover result, if any, is linked; no new search is triggered.
- */
-async function createPostcard(picked) {
-  const images = picked.map((m) => m.dataUrl).filter(Boolean).slice(0, 3);
-  if (images.length === 0) return;
-  const descriptions = picked.map((m) => m.description).filter(Boolean);
-  const sceneName = picked[0]?.sceneName ?? null;
-
-  memories.setPostcardBusy(true, "Creating postcard with Black Forest Labs…");
-  ui.setStatus("Creating postcard with Black Forest Labs…");
-  try {
-    const result = await perception.postcard({ images, descriptions, sceneName });
-    memories.setPostcardBusy(false, `Postcard ready · ${Math.round(result.latency_ms / 1000)} s`);
-    memories.clearSelection();
-    postcardModal.show({
-      imageUrl: result.image_url,
-      caption: descriptions[0] ?? sceneName ?? null,
-      discover: discoverTab.latestResult(),
-    });
-    ui.setStatus("Postcard ready");
-    ui.addMessage("Explorer", "Here is a memory postcard from my journey (Black Forest Labs FLUX.2).");
-  } catch (err) {
-    console.error("[postcard] failed:", err);
-    memories.setPostcardBusy(false, `Postcard failed — ${err.message}`);
-    ui.setStatus("Postcard failed · see Memories tab");
-  }
-}
-
-const memories = createMemories({ maxEntries: 24, onCreatePostcard: createPostcard });
-memories.mount(ui.memoriesPanel);
-
-const perceptionTab = createPerceptionTab();
-perceptionTab.mount(ui.perceptionPanel);
-
-const discoverTab = createDiscoverTab();
-discoverTab.mount(ui.discoverPanel);
-
-/** The one small routing rule for discovery requests. */
-function isDiscoveryRequest(text) {
-  return /\b(find|search|look up|shop)\b.*\b(online|like this|like the one|similar)\b|\bwhere can i (buy|find|get)\b/i.test(
-    String(text ?? ""),
-  );
-}
-
-/** Discover: fresh ego frame → Liquid object description → Nimble live search. */
-async function runDiscover(text) {
-  const frame = captureEgo();
-  if (!frame) {
-    ui.addMessage("System", "Seekr is not ready to look yet.");
-    return;
-  }
-  discoverTab.searching(text);
-  ui.addMessage("Explorer", "Looking at it… describing what I see for a live web search with Nimble.");
-  try {
-    const result = await perception.discover({
-      imageDataUrl: frame.dataUrl,
-      request: text,
-      sceneId: frame.sceneId,
-    });
-    const p = result.perception;
-    if (!p.visible || !result.query) {
-      discoverTab.fail(text, p, "Seekr cannot currently see that object.");
-      ui.addMessage("Explorer", `I can't currently see that. ${p.description ?? ""}`.trim());
-      return;
-    }
-    discoverTab.show({ request: text, perception: p, results: result.results });
-    ui.addMessage(
-      "Explorer",
-      `I see ${p.description || p.object}. I found ${result.results.length} similar result${
-        result.results.length === 1 ? "" : "s"
-      } — see Discover.`,
-    );
-  } catch (err) {
-    console.error("[discover] failed:", err);
-    discoverTab.fail(text, null, err.message);
-    ui.addMessage("Explorer", err.message.startsWith("Nimble") ? err.message : `Discover failed — ${err.message}`);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Brain — the new Seekr Brain (brain/app.py): Liquid AI LFM2.5-VL-3B
-// perception over plain HTTP. Health is polled so the HUD and SEEKR VISION
-// show whether the model is loading, ready, failed or the Brain is offline.
+// Brain status — brain/server.py liveness and its MongoDB Atlas ping. The
+// browser never sees database credentials; it only reads these two endpoints.
 // ---------------------------------------------------------------------------
-const perception = createPerceptionClient({ brainUrl: APP_CONFIG.brainUrl });
-
-/** Latest /health payload, or null when the Brain is unreachable. */
-let brainHealth = null;
-let analyzing = false;
-
-function brainStatusText() {
-  if (!brainHealth) return `Brain: offline · start brain/app.py (${APP_CONFIG.brainUrl})`;
-  switch (brainHealth.status) {
-    case "ready":
-      return `Brain: ${PERCEPTION_MODEL_LABEL} ready · ${brainHealth.device ?? "?"}`;
-    case "loading":
-      return `Brain: loading ${PERCEPTION_MODEL_LABEL}…`;
-    case "failed":
-      return "Brain: model failed to load · see Brain console";
-    default:
-      return `Brain: ${brainHealth.status}`;
+async function fetchJson(path) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch(`${APP_CONFIG.brainUrl}${path}`, { signal: controller.signal });
+    return { ok: response.ok, body: await response.json().catch(() => null) };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-function brainReady() {
-  return brainHealth?.status === "ready";
-}
-
-async function pollBrainHealth() {
+async function pollBrainStatus() {
+  let text;
   try {
-    brainHealth = await perception.health();
+    await fetchJson("/health");
+    const db = await fetchJson("/db/health");
+    text = db.ok
+      ? `Brain: online · MongoDB: connected (${db.body.database})`
+      : `Brain: online · MongoDB: ${db.body?.detail ?? "unavailable"}`;
   } catch (_) {
-    brainHealth = null;
+    text = `Brain: offline · start brain/server.py (${APP_CONFIG.brainUrl})`;
   }
-  const text = brainStatusText();
   ui.setBrainStatus(text);
-  if (!analyzing) {
-    vision.setStatus(brainReady() ? "Ready" : text.replace(/^Brain: /, ""));
-    vision.setAnalyzeEnabled(brainReady());
-  }
-  if (brainHealth) loadRemoteMemories();
 }
 
-pollBrainHealth();
-setInterval(pollBrainHealth, 5000);
+pollBrainStatus();
+setInterval(pollBrainStatus, 10_000);
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -841,7 +715,7 @@ function syncAgentPosePanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Egocentric capture → SEEKR VISION + Memories
+// Egocentric capture — the observation source for upcoming perception
 // ---------------------------------------------------------------------------
 function getCaptureEgoView() {
   if (!avatar) return null;
@@ -868,8 +742,8 @@ function captureEgo() {
 
   const egoView = getCaptureEgoView();
   const { dataUrl, cameraSnapshot } = captureEgoFrame(renderer, scene, camera, egoView, {
-    quality: CONFIG.vision.quality,
-    maxWidth: CONFIG.vision.maxWidth,
+    quality: CONFIG.capture.quality,
+    maxWidth: CONFIG.capture.maxWidth,
   });
 
   const pose = player.getAgentPose();
@@ -887,286 +761,8 @@ function captureEgo() {
     cameraSnapshot,
   };
 
-  vision.show(dataUrl, { sceneName: activeScene.displayName, timestamp: lastEgoFrame.timestamp });
   return lastEgoFrame;
 }
-
-/**
- * Remember this view: capture the current ego frame (the SEEKR VISION image),
- * show it in the Memories gallery at once, and store it through the Brain in
- * Memories.ai with scene, time, pose and the latest Liquid text for this
- * scene when one exists. No extra Liquid inference is triggered.
- */
-function rememberCurrentView(note = null) {
-  const frame = captureEgo();
-  if (!frame) return null;
-
-  const latestPerception = perceptionTab.getAll().at(-1) ?? null;
-  const description =
-    latestPerception && latestPerception.sceneName === frame.sceneName
-      ? latestPerception.description
-      : null;
-
-  const record = memories.add({
-    ...frame,
-    note,
-    description,
-    pose: frame.observedFrom,
-  });
-  if (!record) return null;
-
-  if (!brainHealth) {
-    memories.setStatus(record.id, { status: "error", error: "Brain offline" });
-    return record;
-  }
-
-  // Memories.ai ingests VIDEO: the same ego frame becomes a ~1.5 s WebM clip
-  // (browser-native), which the Brain forwards to the Datalake file upload.
-  (async () => {
-    try {
-      const clip = await encodeEgoClip(frame.dataUrl, { durationMs: 1500, fps: 10 });
-      const result = await perception.storeMemory({
-        clip,
-        sceneId: frame.sceneId,
-        sceneName: frame.sceneName,
-        timestamp: record.timestamp,
-        pose: frame.observedFrom,
-        description,
-        goal: goalNavigator.goal,
-        clientId: `seekr-${record.timestamp}-${record.id}`,
-      });
-      memories.setStatus(record.id, {
-        status: "processing",
-        memoriesId: result.memory_id,
-        operationId: result.operation,
-      });
-      console.log("[memories] accepted by Memories.ai:", result.memory_id, result.operation);
-      pollMemoryOperation(record.id, result.operation);
-    } catch (err) {
-      console.error("[memories] Memories.ai store failed:", err);
-      memories.setStatus(record.id, { status: "error", error: err.message });
-      ui.setStatus("Memory NOT stored in Memories.ai · see Memories tab");
-    }
-  })();
-
-  return record;
-}
-
-/** Minimal readiness poll: GET /operations/{op} until `done` (≤ 3 min). */
-async function pollMemoryOperation(recordId, operationId, { intervalMs = 5000, maxMs = 180_000 } = {}) {
-  if (!operationId) return;
-  const startedAt = performance.now();
-  while (performance.now() - startedAt < maxMs) {
-    await new Promise((r) => setTimeout(r, intervalMs));
-    try {
-      const op = await perception.memoryOperation(operationId);
-      if (op.done) {
-        if (op.error) {
-          memories.setStatus(recordId, {
-            status: "error",
-            error: op.error.message ?? op.error.code ?? "indexing failed",
-          });
-        } else {
-          memories.setStatus(recordId, { status: "stored" });
-        }
-        return;
-      }
-    } catch (err) {
-      console.warn("[memories] operation poll failed:", err.message);
-      return; // leave the card at "processing"
-    }
-  }
-}
-
-/** Reload memories already stored in Memories.ai (once the Brain is up). */
-let remoteMemoriesLoaded = false;
-async function loadRemoteMemories() {
-  if (remoteMemoriesLoaded || !brainHealth) return;
-  remoteMemoriesLoaded = true;
-  try {
-    const list = await perception.listMemories(50);
-    const added = memories.addRemote(list);
-    console.log(`[memories] reloaded ${added} memories from Memories.ai`);
-  } catch (err) {
-    console.warn("[memories] could not reload memories from Memories.ai:", err.message);
-  }
-}
-
-/**
- * Analyze Vision: capture a FRESH ego frame, show that exact frame in SEEKR
- * VISION, send it to the Brain, and display Liquid's perception under it.
- *
- * @param {string|null} task  optional human request to check evidence for
- * @returns {Promise<object|null>} the Brain's response, or null
- */
-async function analyzeVision(task = null) {
-  if (analyzing) return null;
-  if (!brainReady()) {
-    perceptionTab.showError(brainStatusText());
-    return null;
-  }
-
-  const frame = captureEgo();
-  if (!frame) {
-    perceptionTab.showError("Seekr is not ready to look yet.");
-    return null;
-  }
-
-  analyzing = true;
-  vision.setStatus("Analyzing…", { busy: true });
-  vision.setAnalyzeEnabled(false);
-
-  try {
-    const result = await perception.perceive({
-      imageDataUrl: frame.dataUrl,
-      sceneId: frame.sceneId,
-      task,
-    });
-    // The full text lives in the Perception tab; SEEKR VISION just returns
-    // to Ready with the latency.
-    perceptionTab.show({
-      description: result.description,
-      latencyMs: result.latency_ms,
-      model: result.model,
-      sceneName: frame.sceneName,
-    });
-    vision.perceptionDone({ latencyMs: result.latency_ms });
-    console.log("[perception]", result);
-    return result;
-  } catch (err) {
-    console.error("[perception] failed:", err);
-    perceptionTab.showError(`Perception failed — ${err.message}`);
-    vision.perceptionDone({ error: true });
-    return null;
-  } finally {
-    analyzing = false;
-    vision.setAnalyzeEnabled(brainReady());
-  }
-}
-
-const lastLivePos = new THREE.Vector3(Infinity, Infinity, Infinity);
-const lastLiveQuat = new THREE.Quaternion();
-const _liveEyeQ = new THREE.Quaternion();
-
-function refreshLiveVision() {
-  if (!player || !avatar) return;
-
-  const pose = player.getAgentPose();
-  // getEyeQuaternion() returns [x, y, z, w]; wrap it so .dot()/.copy() work.
-  const eye = _liveEyeQ.fromArray(player.getEyeQuaternion());
-  const moved = pose.position.distanceTo(lastLivePos) > CONFIG.vision.minMoveM;
-  const turned =
-    THREE.MathUtils.radToDeg(2 * Math.acos(Math.min(1, Math.abs(eye.dot(lastLiveQuat))))) >
-    CONFIG.vision.minTurnDeg;
-
-  if (!moved && !turned) return;
-
-  lastLivePos.copy(pose.position);
-  lastLiveQuat.copy(eye);
-  captureEgo();
-}
-
-setInterval(refreshLiveVision, CONFIG.vision.liveIntervalMs);
-
-// ---------------------------------------------------------------------------
-// Goal-directed navigation — Body actuators + the closed loop
-//
-// The Body executes exactly the action the Brain returns, through the SAME
-// NavMesh-constrained locomotion manual WASD uses (player.advance via
-// setExternalMove) and the same turn path (player.turnBy). It never chooses
-// an action; a blocked move is reported to the Brain as a fact.
-// ---------------------------------------------------------------------------
-const MOTOR_SETTLE_MS = 150;
-
-/** Rotate Seekr's embodied heading by `degrees` (+ = left), old applyTurn path. */
-async function bodyTurn(degrees) {
-  if (!player) return;
-  player.turnBy(THREE.MathUtils.degToRad(degrees));
-  await new Promise((r) => setTimeout(r, MOTOR_SETTLE_MS));
-}
-
-/**
- * Walk `meters` forward along the embodied eye direction using the external
- * steering path (the old autonomous motor). Returns whether the NavMesh
- * constrained the move on any frame and the horizontal displacement achieved.
- */
-function bodyMoveForward(meters) {
-  return new Promise((resolve) => {
-    if (!player) {
-      resolve({ blocked: false, displacementM: 0 });
-      return;
-    }
-
-    // Forward = the eye's −Z, horizontal components only (embodiedMoveDirection).
-    const q = player.getEyeQuaternion();
-    let fx = -2 * (q.x * q.z + q.w * q.y);
-    let fz = -(1 - 2 * (q.x * q.x + q.y * q.y));
-    const len = Math.hypot(fx, fz);
-    if (!(len > 1e-8)) {
-      const heading = quaternionToHeadingDeg(player.getAgentPose().rotation);
-      fx = Math.sin(THREE.MathUtils.degToRad(heading));
-      fz = Math.cos(THREE.MathUtils.degToRad(heading));
-    } else {
-      fx /= len;
-      fz /= len;
-    }
-
-    const before = player.getAgentPose().position;
-    const durationMs = (meters / Math.max(0.1, CONFIG.player.thirdPerson.walkSpeed)) * 1000;
-    const startedAt = performance.now();
-    let blocked = false;
-
-    player.setExternalMove(fx, fz);
-
-    const tick = () => {
-      // Latch the existing per-frame NavMesh signal for the whole action.
-      if (player.lastNavmeshBlocked) blocked = true;
-      if (performance.now() - startedAt < durationMs && goalNavigator.active) {
-        requestAnimationFrame(tick);
-        return;
-      }
-      player.clearExternalMove();
-      const after = player.getAgentPose().position;
-      const displacementM = Math.hypot(after.x - before.x, after.z - before.z);
-      // A move that achieved almost nothing counts as blocked even if the
-      // constraint fired only at the very first substep.
-      if (displacementM < meters * 0.25) blocked = true;
-      setTimeout(() => resolve({ blocked, displacementM }), MOTOR_SETTLE_MS);
-    };
-    requestAnimationFrame(tick);
-  });
-}
-
-const goalNavigator = createGoalNavigator({
-  capture: () => captureEgo(),
-  step: (payload) => perception.goalStep(payload),
-  turn: bodyTurn,
-  moveForward: bodyMoveForward,
-  say: (text) => ui.addMessage("Explorer", text),
-  onPerception: (reply, frame) => {
-    const p = reply.perception;
-    const tag = p.target_visible
-      ? `target ${p.horizontal}, ${p.distance}${p.reached ? ", reached" : ""}`
-      : "target not visible";
-    perceptionTab.show({
-      description: `${p.description}\n[${tag} → ${reply.action.type}]`,
-      latencyMs: reply.latency_ms,
-      model: reply.model,
-      sceneName: frame.sceneName,
-    });
-    vision.perceptionDone({ latencyMs: reply.latency_ms });
-  },
-});
-
-// Real user WASD takes control away from the autonomous loop. isTrusted is
-// true only for genuine input, so nothing the loop does can cancel itself.
-window.addEventListener("keydown", (event) => {
-  if (!goalNavigator.active || isTyping() || !event.isTrusted) return;
-  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) {
-    goalNavigator.cancel("manual-override", "Stopped — manual control.");
-    player?.clearExternalMove();
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Scene activation and switching
@@ -1199,11 +795,6 @@ function activateScene(descriptor) {
 
   lastSavedPoseKey = null;
   startSessionPoseSampling();
-
-  setTimeout(() => {
-    lastLivePos.set(Infinity, Infinity, Infinity);
-    rememberCurrentView(`Arrived in ${descriptor.displayName}`);
-  }, 300);
 }
 
 let selectedSceneId = null;
@@ -1326,17 +917,6 @@ function buildControlPanel() {
       id: "load-selected-scene",
       label: "Load Selected Scene",
       onClick: () => loadSceneById(currentSceneSelection()),
-    },
-
-    { type: "section", label: "SEEKR VISION" },
-
-    {
-      type: "button",
-      id: "remember-view",
-      label: "Remember this view (M)",
-      onClick: () => {
-        if (rememberCurrentView()) ui.setStatus("View remembered");
-      },
     },
 
     { type: "section", label: "LAYERS" },
@@ -1513,7 +1093,7 @@ worldReady
       url: AVATAR_URL,
       position: [spawnX, spawnY, spawnZ],
       scale: CONFIG.player.avatarVisualScale,
-      // human.glb (same rig layout as Seeker.glb) is authored facing +Z.
+      // human.glb is authored facing +Z, so no model-axis correction.
       facingOffset: 0,
     });
 
@@ -1572,12 +1152,7 @@ worldReady
     console.log("[avatar] Loaded animations:", avatar.animations);
     console.log("[player] Controller ready");
 
-    ui.addMessage(
-      "Explorer",
-      "I am ready to explore. Ask me what I can see, or give me a goal.",
-    );
-
-    setTimeout(() => rememberCurrentView(`Arrived in ${descriptor.displayName}`), 300);
+    ui.addMessage("System", `Ready in ${descriptor.displayName} · WASD to explore`);
   })
   .catch((error) => {
     console.error("[Seekr] Initialization failed:", error);
@@ -1588,62 +1163,6 @@ worldReady
         `at the path configured in body/vite.config.js?`,
     );
   });
-
-// ---------------------------------------------------------------------------
-// Chat hook — the human request channel. In this milestone every message is
-// answered with perception of the current ego view ("What do you see?"), via
-// the same Analyze Vision path. No conversational agent yet.
-// ---------------------------------------------------------------------------
-ui.onSubmit(async (text) => {
-  ui.addMessage("Coach", text);
-
-  // Human cancellation authority: "stop" / "cancel" halts the current goal.
-  if (isStopCommand(text)) {
-    if (goalNavigator.active) {
-      goalNavigator.cancel("cancelled", "Stopped.");
-      player?.clearExternalMove();
-    } else {
-      ui.addMessage("System", "Nothing to stop.");
-    }
-    return;
-  }
-
-  rememberCurrentView(`Coach: ${text}`);
-
-  if (!brainReady()) {
-    ui.addMessage("System", `${brainStatusText()} — the observation was captured to Memories.`);
-    return;
-  }
-
-  // Discovery ("find stools like this online") is checked FIRST: it shares
-  // words with navigation ("find"), and the "online / like this / where can I
-  // buy" phrasing is the distinguishing rule.
-  if (isDiscoveryRequest(text)) {
-    if (analyzing) {
-      ui.addMessage("System", "Wait for the current analysis to finish.");
-      return;
-    }
-    await runDiscover(text);
-    return;
-  }
-
-  // One small routing rule: an obviously goal-directed movement request runs
-  // the closed loop (perceive → decide → act → perceive …); anything else is
-  // answered with perception of the current view.
-  if (isNavigationGoal(text)) {
-    if (analyzing) {
-      ui.addMessage("System", "Wait for the current analysis to finish.");
-      return;
-    }
-    goalNavigator.start(text);
-    return;
-  }
-
-  const result = await analyzeVision(text);
-  if (result) {
-    ui.addMessage("Explorer", result.description);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Hotkeys
@@ -1657,10 +1176,6 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "KeyN") {
     if (navmeshMesh) setNavmeshVisible(!navmeshMesh.visible);
-  }
-
-  if (event.code === "KeyM") {
-    if (rememberCurrentView()) ui.setStatus("View remembered");
   }
 
   if (event.code === "KeyP") {
@@ -1681,12 +1196,6 @@ window.addEventListener("keydown", (event) => {
     navigator.clipboard
       ?.writeText(formatDefaultStart(pose.position, headingDeg))
       .catch(() => console.warn("[Seekr] Clipboard unavailable; pose logged above."));
-  }
-
-  if (event.code === "Enter") {
-    player.controls.unlock();
-    ui.focusInput();
-    event.preventDefault();
   }
 });
 
@@ -1731,16 +1240,8 @@ window.__seekr = {
   scenes: SCENES,
   loadScene: loadSceneById,
   captureEgo,
-  rememberCurrentView,
   get lastEgoFrame() {
     return lastEgoFrame;
-  },
-  memories,
-  perception,
-  analyzeVision,
-  goal: goalNavigator,
-  get brainHealth() {
-    return brainHealth;
   },
   get player() {
     return player;

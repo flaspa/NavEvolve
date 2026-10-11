@@ -3,11 +3,11 @@
  *
  * Layout:
  *   - Top-left HUD: status, live position, view-mode buttons, controls help
- *   - Right sidebar: minimap (top) + tabbed panel (Controls / Chat)
+ *   - Right sidebar: minimap (top) + tabs (Controls / Cognitive Map / Log)
  *
  * The Controls tab is populated by main.js via buildControls(schema) so all
- * bindings (CONFIG ↔ scene) stay in one place. The Chat tab is the future
- * hook for agent.js.
+ * bindings (CONFIG ↔ scene) stay in one place. The Log tab shows system
+ * messages; Cognitive Map is reserved for the next milestone.
  */
 import {
   formatFloorplanPosition,
@@ -72,7 +72,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-help" data-role="help">
         Click scene + move mouse, or use arrow keys to look around<br>
         <b>Esc</b> release mouse · <b>WASD</b> move · <b>V</b> change view<br>
-        <b>N</b> NavMesh · <b>M</b> remember view · <b>P</b> report position
+        <b>N</b> NavMesh · <b>P</b> report position
       </div>
     </div>
     <button type="button" class="edge-toggle edge-toggle-left"
@@ -112,16 +112,20 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const sidebar = document.createElement("div");
   sidebar.id = "sidebar";
   sidebar.innerHTML = `
-    <div data-role="vision-mount"></div>
     <div data-role="minimap-mount"></div>
     <div class="panel">
       <div class="panel-tabs">
         <button type="button" data-tab="controls" class="active">Controls</button>
-        <button type="button" data-tab="chat">Chat</button>
-        <button type="button" data-tab="discover">Discover</button>
-        <button type="button" data-tab="memories">Memories</button>
+        <button type="button" data-tab="cognitive-map">Cognitive Map</button>
+        <button type="button" data-tab="chat">Log</button>
       </div>
       <div class="panel-body" data-tab-panel="controls"></div>
+      <div class="panel-body hidden" data-tab-panel="cognitive-map">
+        <div class="cognitive-map-placeholder">
+          Cognitive Map — the persistent graph of places Seekr has visited
+          (MongoDB). Coming in the next milestone.
+        </div>
+      </div>
       <div class="panel-body hidden" data-tab-panel="chat">
         <div class="chat-tools">
           <button type="button" class="chat-copy" data-role="copy-chat"
@@ -131,14 +135,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
           <span class="chat-copy-note" data-role="copy-chat-note" aria-live="polite"></span>
         </div>
         <div class="chat-log" data-role="log"></div>
-        <form class="chat-row" data-role="form">
-          <input type="text" data-role="input"
-                 placeholder="Message or command… (Enter)" autocomplete="off" />
-          <button type="submit">Send</button>
-        </form>
       </div>
-      <div class="panel-body hidden" data-tab-panel="discover"></div>
-      <div class="panel-body hidden" data-tab-panel="memories"></div>
     </div>
     <button type="button" class="edge-toggle edge-toggle-right"
             data-role="sidebar-toggle" aria-expanded="true"
@@ -204,12 +201,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const minimapMount = sidebar.querySelector('[data-role="minimap-mount"]');
   const tabButtons = [...sidebar.querySelectorAll(".panel-tabs button")];
   const tabPanels = [...sidebar.querySelectorAll("[data-tab-panel]")];
-  const memoriesPanel = sidebar.querySelector('[data-tab-panel="memories"]');
-  const discoverPanel = sidebar.querySelector('[data-tab-panel="discover"]');
-  // Perception history stays alive (navigation and memories read it) but is
-  // no longer a visible tab: it renders into a detached container.
-  const perceptionPanel = document.createElement("div");
-  const visionMount = sidebar.querySelector('[data-role="vision-mount"]');
+  const cognitiveMapPanel = sidebar.querySelector('[data-tab-panel="cognitive-map"]');
 
   /**
    * Chat speakers that get their own styling.
@@ -475,18 +467,6 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
   // ---------- chat ----------
   const logEl = sidebar.querySelector('[data-role="log"]');
-  const formEl = sidebar.querySelector('[data-role="form"]');
-  const inputEl = sidebar.querySelector('[data-role="input"]');
-
-  let submitHandler = null;
-  formEl.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = inputEl.value.trim();
-    if (!text) return;
-    inputEl.value = "";
-    inputEl.blur(); // give WASD control back after sending
-    submitHandler?.(text);
-  });
 
   // ---------- copy chat (read-only research utility) ----------
   // Reads the speaker and message text of the chat lines currently shown and
@@ -816,10 +796,8 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
 
     minimapMount,
 
-    visionMount,
-    perceptionPanel,
-    discoverPanel,
-    memoriesPanel,
+    /** Reserved for the Cognitive Map view (next milestone). */
+    cognitiveMapPanel,
 
     buildControls,
     getControlMount,
@@ -843,10 +821,6 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       const active = document.activeElement;
       if (!active) return false;
       return active === ref.input || ref.valueEl?.contains(active) === true;
-    },
-
-    onSubmit(fn) {
-      submitHandler = fn;
     },
 
     /** Collapse state for the two panels. Presentation only. */
@@ -888,11 +862,6 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     },
 
     showCaptureGallery,
-
-    focusInput() {
-      showTab("chat");
-      inputEl.focus();
-    },
 
     dispose() {
       root.remove();
