@@ -1168,3 +1168,15 @@ body {
   letter-spacing: 0.4px;
   color: rgba(255, 255, 255, 0.55);
 }
+
+.hud-link {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9ecbff;
+  text-decoration: none;
+}
+
+.hud-link:hover {
+  text-decoration: underline;
+}

@@ -66,6 +66,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-pos" data-role="pos"></div>
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
       <div class="hud-pos" data-role="captures">Observations: —</div>
+      <a class="hud-link" href="http://localhost:8000/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
       <div class="hud-view">
         <button type="button" data-mode="first">1st Person</button>
         <button type="button" data-mode="third">3rd Person</button>

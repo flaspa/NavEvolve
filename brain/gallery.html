@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NavEvolve Observations</title>
+<style>
+  :root { --bg: #15161a; --film: #050505; --ink: #e8e8ee; --dim: #8b8d96; --accent: #e0c48a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 16px;
+           padding: 12px 16px; background: rgba(21, 22, 26, 0.95); border-bottom: 1px solid #2a2c33; }
+  h1 { margin: 0; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+  #count { color: var(--dim); }
+  button { margin-left: auto; padding: 6px 14px; border: 1px solid #3a3d46; border-radius: 6px;
+           background: #22242b; color: var(--ink); cursor: pointer; }
+  button:hover { background: #2c2f38; }
+  #sheet { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; padding: 16px; }
+  .frame { background: var(--film); padding: 14px 8px 8px; border-radius: 3px; cursor: zoom-in;
+           position: relative; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+  /* sprocket holes along the top edge */
+  .frame::before { content: ""; position: absolute; top: 4px; left: 8px; right: 8px; height: 5px;
+                   background: repeating-linear-gradient(90deg, #2b2b2b 0 8px, transparent 8px 16px); }
+  .frame img { display: block; width: 100%; aspect-ratio: 768 / 419; object-fit: cover; background: #111; }
+  .meta { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; margin-top: 6px;
+          font: 11px/1.45 ui-monospace, Consolas, monospace; color: var(--dim); }
+  .num { color: var(--accent); font-weight: 700; }
+  .dist { color: var(--ink); text-align: right; }
+  .empty { padding: 40px 16px; color: var(--dim); }
+  #lightbox { position: fixed; inset: 0; z-index: 5; display: none; align-items: center; justify-content: center;
+              flex-direction: column; gap: 10px; background: rgba(0, 0, 0, 0.9); cursor: zoom-out; }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 94vw; max-height: 86vh; border: 10px solid var(--film); }
+  #lightbox-caption { color: var(--dim); font: 12px ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Observation Gallery</h1>
+  <span id="count">Loading…</span>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<main id="sheet"></main>
+<div id="lightbox"><img alt="Observation" /><div id="lightbox-caption"></div></div>
+<script>
+  // Reuses the existing API: GET /observations, GET /observations/{id}/image.jpg
+  const sheet = document.getElementById("sheet");
+  const countEl = document.getElementById("count");
+  const lightbox = document.getElementById("lightbox");
+  const lightboxImg = lightbox.querySelector("img");
+  const lightboxCaption = document.getElementById("lightbox-caption");
+
+  function fmtTime(ms) {
+    return Number.isFinite(ms) ? new Date(ms).toLocaleString() : "—";
+  }
+  function fmtDist(range) {
+    const d = range?.distanceM;
+    return Number.isFinite(d) ? `${d.toFixed(2)} m` : "no surface";
+  }
+  function text(tag, cls, value) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    el.textContent = value;
+    return el;
+  }
+
+  async function load() {
+    countEl.textContent = "Loading…";
+    try {
+      const res = await fetch("/observations?limit=100");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail ?? `HTTP ${res.status}`);
+      const shown = data.items.length;
+      countEl.textContent = `${data.total} observations in MongoDB${shown < data.total ? ` · newest ${shown} shown` : ""}`;
+      sheet.replaceChildren();
+      if (!shown) sheet.append(text("div", "empty", "No observations yet — walk around or press C in NavEvolve."));
+      data.items.forEach((obs, i) => {
+        const number = data.total - i;           // newest first
+        const src = `/observations/${obs.id}/image.jpg`;
+        const caption = `#${number} · ${obs.scene_id} · ${fmtTime(obs.timestamp)} · ${fmtDist(obs.range)} · ${obs.trigger}`;
+
+        const frame = document.createElement("figure");
+        frame.className = "frame";
+        frame.style.margin = "0";
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.decoding = "async";
+        img.src = src;
+        img.alt = caption;
+        const meta = document.createElement("figcaption");
+        meta.className = "meta";
+        meta.append(
+          text("span", "num", `#${number}`), text("span", "dist", fmtDist(obs.range)),
+          text("span", "", obs.scene_id.replace("interior_", "")), text("span", "dist", fmtTime(obs.timestamp)),
+        );
+        frame.append(img, meta);
+        frame.addEventListener("click", () => {
+          lightboxImg.src = src;
+          lightboxCaption.textContent = caption;
+          lightbox.classList.add("open");
+        });
+        sheet.append(frame);
+      });
+    } catch (err) {
+      countEl.textContent = `Could not load observations — ${err.message}`;
+    }
+  }
+
+  lightbox.addEventListener("click", () => lightbox.classList.remove("open"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") lightbox.classList.remove("open"); });
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+</script>
+</body>
+</html>

@@ -42,6 +42,7 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `POST /observations` | store an ego JPEG + pose + camera snapshot + splat range |
 | `GET /observations` | recent observations (metadata) and total |
 | `GET /observations/{id}/image.jpg` | the stored JPEG |
+| `GET /gallery` | contact-sheet gallery of stored observations (also linked from the HUD) |
 
 **Frontend** — http://localhost:5000
 

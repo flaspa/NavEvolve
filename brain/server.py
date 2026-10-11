@@ -18,6 +18,7 @@ Endpoints:
     GET  /observations     recent observation metadata (+ count)
     GET  /observations/{id}            metadata
     GET  /observations/{id}/image.jpg  the stored JPEG
+    GET  /gallery          contact-sheet view of stored observations
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pathlib import Path
 import anyio
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -152,3 +154,9 @@ async def observation_image(obs_id: str) -> Response:
     if jpeg is None:
         raise HTTPException(status_code=404, detail="observation not found")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/gallery", include_in_schema=False)
+async def gallery() -> FileResponse:
+    """Static contact sheet; it reads the two observation endpoints above."""
+    return FileResponse(_HERE / "gallery.html", media_type="text/html")

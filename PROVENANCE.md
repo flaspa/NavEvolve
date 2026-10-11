@@ -62,3 +62,9 @@ Milestone 2 — egocentric observations in MongoDB:
 - `brain/server.py`, `brain/db.py`: `POST /observations`, `GET /observations`,
   `GET /observations/{id}`, `GET /observations/{id}/image.jpg`. The
   `observations` collection stores the JPEG as BSON binary.
+
+Observation Gallery:
+- `brain/gallery.html` + `GET /gallery`: a contact sheet of stored observations
+  with a lightbox. It reads the existing `/observations` endpoints, so storage
+  is unchanged.
+- `body/src/ui.js`: "Observation Gallery ↗" link in the HUD.
