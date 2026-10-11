@@ -45,6 +45,8 @@ body {
      Font size, family, line height and UI scale are all untouched — the only
      thing that moved is how much room the sentence has. */
   max-width: 360px;
+  /* #hud is click-through; the panel itself takes clicks (gallery link). */
+  pointer-events: auto;
 }
 
 .hud-title {
