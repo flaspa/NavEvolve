@@ -199,8 +199,9 @@ def fuse_position(sightings: list[dict]) -> dict:
     if not pts:
         return {"position": None, "position_method": "none", "position_uncertainty_m": None,
                 "spatial_confidence": 0.0, "fused_views": 0, "rejected_views": 0, "grounded_views": 0}
-    seed = min(pts, key=lambda p: p[1])[0]
-    used = [p for p in pts if math.dist(p[0], seed) <= FUSE_M]
+    seed_pt = min(pts, key=lambda p: p[1])
+    seed = seed_pt[0]
+    used = [p for p in pts if math.dist(p[0], seed) <= gate_m(seed_pt[2], p[2])]
     rejected = len(pts) - len(used)
     w = [1 / (sg * sg) for _, sg, _ in used]
     fused = [sum(p[0][i] * wi for p, wi in zip(used, w)) / sum(w) for i in range(3)]
@@ -229,11 +230,17 @@ def _sightings_list(doc: dict) -> list[dict]:
              "seen_at": doc.get("last_seen"), "legacy": True} for i, o in enumerate(doc.get("obs_ids", []))]
 
 
-def _same_object(doc: dict, key: str, pos: list[float] | None, emb: list[float] | None, place_id: str | None) -> bool:
+def gate_m(method_a: str | None, method_b: str | None) -> float:
+    """Spatial merge radius: at least MERGE_M, widened to the combined 1-sigma of two approximate estimates."""
+    return max(MERGE_M, SIGMA.get(method_a or "", 2.0) + SIGMA.get(method_b or "", 2.0)) if "approx" in f"{method_a}{method_b}" else MERGE_M
+
+
+def _same_object(doc: dict, key: str, pos: list[float] | None, emb: list[float] | None, place_id: str | None,
+                 method: str | None = None) -> bool:
     if doc["name"] != key:
         return False
     if pos is not None and doc.get("position") is not None:
-        return math.dist(doc["position"], pos) <= MERGE_M
+        return math.dist(doc["position"], pos) <= gate_m(method, doc.get("location_method"))
     # No spatial evidence on one side: require same place AND near-identical description.
     same_place = place_id is not None and (doc.get("place_id") == place_id or place_id in doc.get("associated_place_ids", []))
     similar = emb is not None and doc.get("embedding") and _cos(doc["embedding"], emb) >= SAME_DESC_COS
@@ -275,11 +282,12 @@ def ingest(scene_id: str, obs_id: str, sightings: list[dict], embed: bool = True
             # "Suspended floral chandelier"), so a name-only gate would duplicate it. Spatially
             # overlapping memories are compared by description embedding instead.
             nearby = [d for d in coll.find({"scene_id": scene_id, "position": {"$ne": None}})
-                      if pos is not None and d.get("position") and math.dist(d["position"], pos) <= MERGE_M
+                      if pos is not None and d.get("position")
+                      and math.dist(d["position"], pos) <= gate_m(method, d.get("location_method"))
                       and obs_id not in d.get("obs_ids", [])]
             if embed and emb is None and (nearby or (any(c.get("embedding") for c in candidates) and pos is None)):
                 emb = _embed_text(text)
-            match = next((d for d in candidates if _same_object(d, key, pos, emb, links["place_id"])), None)
+            match = next((d for d in candidates if _same_object(d, key, pos, emb, links["place_id"], method)), None)
             if match is None and emb is not None and nearby:
                 scored = sorted(((_cos(d["embedding"], emb), d) for d in nearby if d.get("embedding")), key=lambda t: -t[0])
                 if scored and scored[0][0] >= SAME_OBJECT_COS:
