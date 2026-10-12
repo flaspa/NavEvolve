@@ -15,6 +15,7 @@
 
 const STOP_RE = /^\s*(stop|cancel|halt)\b/i;
 const PLACES_RE = /\b(what|which)\b.*\b(places?|rooms?)\b.*\b(remember|know|seen|visited)|\bremember\b.*\bplaces?\b/i;
+const NEAR_RE = /\b(what|which)\s+(objects?|things?|items?)\b.*\b(near|next to|beside|around|close to)\s+(the|that|this|a|an)?\s*(.+?)[?.!\s]*$/i;
 const PLACE_OBJECTS_RE = /\b(what|which)\s+(objects?|things?|items?|furniture)\b.*\b(in|at|inside)\s+(the\s+)?(.+?)[?.!\s]*$/i;
 const PLACES_WITH_RE = /\b(which|what)\s+(places?|rooms?|areas?)\b.*\b(contain|have|has|with)\s+(.+?)[?.!\s]*$/i;
 const WHERE_RE = /\b(where|show me where)\b.*\b(see|seen|saw|is|was|find)\b.*?\b(the|a|an)?\s*([a-z][a-z0-9 -]+?)[?.!\s]*$/i;
@@ -26,7 +27,7 @@ const NAV_VERBS = new Set(["take", "bring", "lead", "go", "walk", "navigate", "h
 const POLITE = /^(please\s+|can you\s+|could you\s+|would you\s+|now\s+)+/i;
 const NAV_FILLER = new Set([...NAV_VERBS, "me", "us", "over", "back", "and", "then", "please", "to", "towards",
   "toward", "next", "near", "nearby", "by", "beside", "in", "front", "of", "at", "for", "up", "out", "the", "a",
-  "an", "some", "that", "this", "your", "place", "spot", "location", "room", "area", "where", "you", "saw", "found",
+  "an", "some", "that", "this", "your", "place", "spot", "location", "room", "area", "where", "you", "saw", "found", "with", "containing",
   "noticed", "seen", "remember", "remembered", "spotted", "there", "again", "closer"]);
 
 /** Object phrase of a navigation command, or null when it is not one. */
@@ -57,7 +58,7 @@ function terms(text) {
 export const AGENT_NAME = "NavEvolve Agent";
 
 export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, getLastFrame = () => null,
-  locateBbox = () => null, say = ui.addMessage }) {
+  locateBbox = () => null, locate = () => {}, markers = () => [], say = ui.addMessage }) {
   let busy = false;
   let currentGoal = null;
   let exploring = false;
@@ -175,7 +176,11 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const objs = await objectMemories(query, 3);
     if (objs.length) {
       const o = objs[0];
-      const pos = o.position ? ` Approximate position (${o.position[0].toFixed(1)}, ${o.position[2].toFixed(1)})${o.location_method === "splat-bbox-raycast" ? ", grounded on the splat surface" : ", approximate"}.` : "";
+      const unc = o.position_uncertainty_m ? ` ±${o.position_uncertainty_m} m` : "";
+      const pos = o.position
+        ? ` Estimated position (${o.position[0].toFixed(1)}, ${o.position[2].toFixed(1)})${unc}, ${o.location_method?.startsWith("splat") ? "grounded on the splat surface" : "approximate"}${o.location_method?.includes("fused") ? ` from ${o.fused_views} views` : ""}${o.rejected_views ? ` (${o.rejected_views} inconsistent sighting${o.rejected_views === 1 ? "" : "s"} excluded)` : ""}. I've highlighted it on the map.`
+        : " I don't have a position for it.";
+      locate(o.id);
       reply(`I remember a ${o.display_name ?? o.name}${o.description ? ` (${o.description})` : ""}${placePhrase(o)}, with ${evidencePhrase(o)} (similarity ${o.score.toFixed(2)}).${pos}` +
         (objs.length > 1 ? ` I also remember ${objs.length - 1} other possible match${objs.length === 2 ? "" : "es"}: ${objs.slice(1).map((x) => x.display_name ?? x.name).join(", ")}. I can navigate to the first and verify.` : " I can navigate there and verify."));
       return;
@@ -267,6 +272,23 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const n = String(name).toLowerCase();
     return q.length > 0 && q.every((t) => n.includes(t)) || (q.length > 1 && n.includes(q.at(-1)));
   };
+
+  /** "What objects are near the doorway?" — objects within 2.5 m of the anchor's estimated position. */
+  async function nearObjects(anchorQuery) {
+    const anchors = await objectMemories(anchorQuery, 1);
+    const a = anchors[0];
+    if (!a) return reply(`I have no object memory of a ${anchorQuery} to measure from.`);
+    if (!a.position) return reply(`I remember a ${a.display_name ?? a.name}, but I have no position estimate for it, so I can't say what is near it.`);
+    locate(a.id);
+    const near = markers()
+      .filter((m) => m.id !== a.id)
+      .map((m) => ({ m, d: Math.hypot(m.x - a.position[0], m.z - a.position[2]) }))
+      .filter((x) => x.d <= 2.5)
+      .sort((x, y) => x.d - y.d)
+      .slice(0, 8);
+    if (!near.length) return reply(`Nothing else I remember has an estimated position within 2.5 m of the ${a.display_name ?? a.name} (whose position is ${a.location_method?.startsWith("splat") ? "grounded" : "approximate"}).`);
+    reply(`Near the ${a.display_name ?? a.name} (${a.location_method?.startsWith("splat") ? "grounded" : "approximate"} position) I remember: ${near.map((x) => `${x.m.name} ~${x.d.toFixed(1)} m${x.m.kind === "approx" ? " (approx.)" : ""}`).join(", ")}. Distances are estimates between remembered positions, not measured now.`);
+  }
 
   /** "What objects do you remember in the dining room?" */
   async function placeObjects(placeQuery) {
@@ -561,6 +583,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       return { intent: find ? "find" : "navigate", target, clean };
     }
     if (HERE_RE.test(clean)) return { intent: "describe_here", clean };
+    if ((m = NEAR_RE.exec(clean))) return { intent: "near", target: m[5], clean };
     if ((m = PLACE_OBJECTS_RE.exec(clean))) return { intent: "place_objects", target: m[5], clean };
     if ((m = PLACES_WITH_RE.exec(clean))) return { intent: "places_with", target: m[4], clean };
     if ((m = SEEN_RE.exec(clean))) return { intent: "have_seen", target: m[5], clean };
@@ -580,6 +603,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       else if (intent === "find") await findObject(target);
       else if (intent === "navigate") await navigateTo(target);
       else if (intent === "have_seen") await haveSeen(target);
+      else if (intent === "near") await nearObjects(target);
       else if (intent === "place_objects") await placeObjects(target);
       else if (intent === "places_with") await placesWith(target);
       else if (intent === "yes" && pendingOffer) { const t = pendingOffer; pendingOffer = null; await findObject(t); }

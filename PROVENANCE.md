@@ -195,3 +195,21 @@ Priority 2 — object-level semantic memory (branch `feature/object-memory`):
   contents; places-with queries; explore offer when nothing is remembered.
   The inspector lists the selected place's objects. Observation image/text
   embeddings, ranges, place spatial signatures and the harness are untouched.
+
+Priority 3 — spatial fusion + interactive object map (branch `feature/spatial-fusion`):
+- Reused from teammate **Jun Jiang**: the minimap marker/path overlay
+  (`setMarkers`/`setPath`, origin/explore-local `minimap.js`), extended with
+  grounded vs approximate styling, uncertainty rings, destination highlight,
+  hover tooltips and click selection. Existing splat raycasting
+  (`measureCenterRange`, `measureBboxRange`, `approximateBboxPoint`) is unchanged.
+- New in `brain/objects.py`: `fuse_position()` — confidence-weighted fusion of
+  per-sighting positions (sigma 0.35 m grounded, 1.5 m approximate), seeded by
+  the best-grounded sighting; sightings farther than 1 m from it are kept as
+  evidence but excluded as inconsistent. Stores `position_uncertainty_m`,
+  `spatial_confidence`, `fused_views`, `rejected_views`, `grounded_views`;
+  sightings now also keep `range_m` and `camera_pose`. `refuse` recomputes
+  from stored sightings. `GET /objects/markers` serves positioned objects only.
+- UI: markers → Place Memory Inspector object view (sightings, method,
+  uncertainty, place, supporting thumbnails, navigate-to-viewpoint); selecting
+  a place highlights its objects on the minimap; Talk answers "where is X" with
+  uncertainty wording, "what objects are near X", and highlights the marker.

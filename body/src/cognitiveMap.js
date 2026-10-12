@@ -11,7 +11,7 @@
  * GET /observations/{id} and GET /observations/{id}/image.jpg endpoints.
  */
 
-export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
+export function createCognitiveMap({ mount, footer, brainUrl = "", onSelectPlace = () => {}, onSelectObject = () => {}, navigateTo = () => {} }) {
   mount.textContent = "";
   const canvas = document.createElement("canvas");
   canvas.className = "cognitive-map-canvas";
@@ -155,6 +155,8 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
         else inspector.close();
       }
     },
+    /** Opens the inspector on an object marker. */
+    openObject(marker) { inspector.openObject(marker); },
     /** Opens the inspector for a place id (also used by the debug handle). */
     openPlace(placeId) {
       const place = (lastGraph?.places ?? []).find((p) => p.place_id === placeId);
@@ -206,8 +208,10 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
     const img = el("image");
     const cache = new Map(); // observation id → metadata document
     let place = null;
+    let object = null; // marker/object memory being inspected instead of a place
     let index = 0;
     let requestId = 0;
+    const ids = () => (object ? object.obs_ids : place.observation_ids);
 
     el("close").addEventListener("click", close);
     el("prev").addEventListener("click", () => step(-1));
@@ -278,12 +282,22 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
     }
 
     async function show() {
-      const ids = place.observation_ids;
-      const id = ids[index];
-      const n = ids.length;
+      const list = ids();
+      const id = list[index];
+      const n = list.length;
       const myRequest = ++requestId;
-      el("title").textContent = `Place ${place.place_id}`;
-      el("subtitle").textContent = `${n} observation${n === 1 ? "" : "s"}`;
+      if (object) {
+        el("title").textContent = object.name;
+        const unc = object.uncertainty_m ? ` ±${object.uncertainty_m} m` : "";
+        const method = object.method === "none" || !object.position ? "position unknown"
+          : `${object.method?.startsWith("splat") ? "grounded on the splat surface" : "approximate (bearing + centre range)"}${object.method?.includes("fused") ? ", fused from several views" : ""}`;
+        el("subtitle").textContent = `${object.sightings ?? 1} sighting${(object.sightings ?? 1) === 1 ? "" : "s"} · ${method}${unc}` +
+          `${object.position ? ` · (${object.position[0].toFixed(1)}, ${object.position[2].toFixed(1)})` : ""}` +
+          `${object.place_id ? ` · in ${object.place_id}${object.place_label ? ` "${object.place_label}"` : ""}` : " · place not resolved"}`;
+      } else {
+        el("title").textContent = `Place ${place.place_id}`;
+        el("subtitle").textContent = `${n} observation${n === 1 ? "" : "s"}`;
+      }
       el("index").textContent = `${index + 1} / ${n}`;
       el("prev").disabled = index === 0;
       el("next").disabled = index >= n - 1;
@@ -299,7 +313,7 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
         el("meta").textContent =
           `Observation ${id}\nRange ${Number.isFinite(range) ? `${range.toFixed(2)} m` : "no surface"} ahead` +
           `${when ? ` · ${when}` : ""}${doc.trigger ? ` · ${doc.trigger}` : ""}`;
-        el("description").textContent = describe(doc);
+        el("description").textContent = object ? `${object.description || ""}\n\nView: ${describe(doc)}`.trim() : describe(doc);
       } catch (err) {
         if (myRequest !== requestId) return;
         el("description").textContent = `Could not load observation — ${err.message}`;
@@ -309,13 +323,14 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
 
     function step(delta) {
       const next = index + delta;
-      if (!place || next < 0 || next >= place.observation_ids.length) return;
+      if ((!place && !object) || next < 0 || next >= ids().length) return;
       index = next;
       show();
     }
 
     function open(nextPlace) {
       const samePlace = place?.place_id === nextPlace.place_id;
+      object = null;
       place = nextPlace;
       if (!samePlace) index = 0;
       selectedId = place.place_id;
@@ -323,9 +338,31 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
       draw(lastGraph);
       show();
       loadObjects();
+      onSelectPlace(place.place_id);
+    }
+
+    /** Inspect an object memory (from a minimap marker): its sightings, place and a navigate option. */
+    function openObject(marker) {
+      place = null;
+      object = marker;
+      index = 0;
+      selectedId = marker.place_id ?? null;
+      root.hidden = false;
+      draw(lastGraph);
+      show();
+      const box = el("objects");
+      box.textContent = "";
+      const nav = document.createElement("button");
+      nav.type = "button";
+      nav.className = "pi-object";
+      nav.textContent = `Navigate to a viewpoint where I saw the ${marker.name}`;
+      nav.addEventListener("click", () => navigateTo(marker.name));
+      box.append(nav);
+      onSelectObject(marker.id);
     }
 
     function refresh(nextPlace) {
+      if (object) return;
       place = nextPlace;
       index = Math.min(index, place.observation_ids.length - 1);
       show();
@@ -335,6 +372,9 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
       if (root.hidden) return;
       root.hidden = true;
       place = null;
+      object = null;
+      onSelectPlace(null);
+      onSelectObject(null);
       onClose();
     }
 
@@ -345,6 +385,6 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
       if (event.code === "Escape" && !root.hidden) close();
     });
 
-    return { open, refresh, close };
+    return { open, openObject, refresh, close };
   }
 }

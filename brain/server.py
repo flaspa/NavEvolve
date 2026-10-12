@@ -33,6 +33,8 @@ Endpoints:
     GET  /places/{place_id}/objects   objects observed in a place (active graph)
     POST /objects/relink   refresh cached place links from the active graph
     POST /objects/backfill bounded detect+ingest of enriched observations (?limit=)
+    POST /objects/refuse   recompute fused positions from stored sightings
+    GET  /objects/markers  minimap markers: id, name, position, method, uncertainty, place
     POST /talk/choose      Gemini frontier choice {goal, context, options[], observation_ids[]}
     POST /cognitive-map/rebuild  rebuild the scene graph with the ACTIVE policy (no policy change)
     DELETE /observations   local dev only: delete one scene's or all observations
@@ -428,3 +430,33 @@ async def backfill_objects(scene_id: str, limit: int = 3) -> dict:
         return await anyio.to_thread.run_sync(objects.backfill, scene_id, min(limit, 10))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"backfill failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+@app.post("/objects/refuse")
+async def refuse_objects(scene_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.refuse, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+def _markers(scene_id: str) -> list[dict]:
+    out = []
+    for o in objects.search(scene_id, None, limit=300):
+        if not o.get("position"):
+            continue  # unknown positions are never drawn as pins
+        out.append({"id": o["id"], "name": o.get("display_name") or o["name"], "position": o["position"],
+                    "method": o.get("location_method"), "uncertainty_m": o.get("position_uncertainty_m"),
+                    "confidence": o.get("spatial_confidence", o.get("position_confidence")),
+                    "sightings": o.get("sighting_count") or 1, "place_id": o.get("place_id"), "place_label": o.get("place_label"),
+                    "obs_ids": o.get("obs_ids", []), "description": o.get("description", "")})
+    return out
+
+
+@app.get("/objects/markers")
+async def object_markers(scene_id: str) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(_markers, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "total": len(items), "items": items}

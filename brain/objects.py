@@ -42,6 +42,8 @@ OBJECTS = "objects"
 MERGE_M = 1.0          # teammate's rule: same name within 1 m is the same object
 SAME_DESC_COS = 0.90   # without positions: same name AND near-identical description
 LINK_M = 1.5           # viewpoint-to-place-node fallback link distance
+FUSE_M = 1.0           # a sighting farther than this from the consensus is kept as evidence but not fused
+SIGMA = {"splat-bbox-raycast": 0.35, "image-center-approx": 1.5}  # per-sighting 1-sigma radius (m)
 
 # Teammate's prompt, verbatim (brain/models.py LIST).
 LIST_PROMPT = """List 6-10 distinct physical objects clearly visible in this image (furniture, fixtures, decor, doors, windows...).
@@ -180,6 +182,40 @@ def relink(scene_id: str) -> dict:
     return {"scene_id": scene_id, "objects": n, "graph_id": links["graph_id"] if n else None}
 
 
+# ── Multi-view spatial fusion ────────────────────────────────────────────────
+def fuse_position(sightings: list[dict]) -> dict:
+    """Confidence-weighted fusion of per-sighting positions.
+
+    Grounded sightings (splat raycast) carry a small sigma, approximate ones a
+    large sigma. The consensus is seeded by the best-grounded sighting; any
+    sighting farther than FUSE_M from it is an INCONSISTENT estimate (a
+    different physical object, or a bad ray) and is excluded from the fused
+    position but retained in `sightings`. Each sighting's own measurement and
+    provenance are never altered.
+    """
+    pts = [(s["position"], SIGMA.get(s.get("method"), 2.0), s.get("method")) for s in sightings
+           if isinstance(s.get("position"), list) and len(s["position"]) == 3]
+    if not pts:
+        return {"position": None, "position_method": "none", "position_uncertainty_m": None,
+                "spatial_confidence": 0.0, "fused_views": 0, "rejected_views": 0, "grounded_views": 0}
+    seed = min(pts, key=lambda p: p[1])[0]
+    used = [p for p in pts if math.dist(p[0], seed) <= FUSE_M]
+    rejected = len(pts) - len(used)
+    w = [1 / (sg * sg) for _, sg, _ in used]
+    fused = [sum(p[0][i] * wi for p, wi in zip(used, w)) / sum(w) for i in range(3)]
+    spread = max((math.dist(p[0], fused) for p in used), default=0.0)
+    sigma_fused = 1 / math.sqrt(sum(w))
+    uncertainty = round(max(sigma_fused, spread, 0.25), 2)
+    grounded = sum(1 for p in used if p[2] == "splat-bbox-raycast")
+    method = "splat-bbox-raycast" if grounded else "image-center-approx"
+    if len(used) > 1:
+        method += "+fused"
+    confidence = round(min(0.95, (0.7 if grounded else 0.2) + 0.1 * (len(used) - 1) - 0.1 * rejected), 2)
+    return {"position": [round(v, 4) for v in fused], "position_method": method,
+            "position_uncertainty_m": uncertainty, "spatial_confidence": max(0.05, confidence),
+            "fused_views": len(used), "rejected_views": rejected, "grounded_views": grounded}
+
+
 # ── Ingest: per-sighting evidence, idempotent, merge needs more than a name ──
 def _sightings_list(doc: dict) -> list[dict]:
     s = doc.get("sightings")
@@ -238,19 +274,19 @@ def ingest(scene_id: str, obs_id: str, sightings: list[dict], embed: bool = True
                 emb = _embed_text(text)  # needed to decide a merge without positions
             match = next((d for d in candidates if _same_object(d, key, pos, emb, links["place_id"])), None)
             sighting = {"observation_id": obs_id, "bbox": s.get("bbox"), "description": desc, "position": pos,
-                        "method": method, "confidence": conf, "seen_at": now}
+                        "range_m": s.get("range_m") or (obs.get("range") or {}).get("distanceM"),
+                        "camera_pose": obs.get("pose"), "method": method, "confidence": conf, "seen_at": now}
             if match:
                 prev = _sightings_list(match)
                 n = len(prev)
-                merged_pos = match.get("position")
-                if pos is not None and merged_pos is not None:
-                    merged_pos = [(a * n + b) / (n + 1) for a, b in zip(merged_pos, pos)]
-                elif pos is not None:
-                    merged_pos = pos
+                fused = fuse_position(prev + [sighting])
                 coll.update_one({"_id": match["_id"]}, {"$set": {
-                    "sightings": prev + [sighting], "sighting_count": n + 1, "position": merged_pos,
+                    "sightings": prev + [sighting], "sighting_count": n + 1,
+                    "position": fused["position"], "location_method": fused["position_method"],
+                    "position_uncertainty_m": fused["position_uncertainty_m"],
+                    "spatial_confidence": fused["spatial_confidence"], "fused_views": fused["fused_views"],
+                    "rejected_views": fused["rejected_views"], "grounded_views": fused["grounded_views"],
                     "position_confidence": max(match.get("position_confidence", 0), conf),
-                    "location_method": match.get("location_method") if match.get("position") is not None else method,
                     "last_seen": now, "last_obs_id": obs_id, "bbox_last": s.get("bbox"), **links},
                     "$addToSet": {"obs_ids": obs_id}})
                 out.append({"id": str(match["_id"]), "name": key, "merged": True, "sighting_count": n + 1})
@@ -262,6 +298,9 @@ def ingest(scene_id: str, obs_id: str, sightings: list[dict], embed: bool = True
                     "embedding": emb, "embedding_model": perception.EMBEDDING_MODEL if emb else None,
                     "embedding_dim": len(emb) if emb else None,
                     "position": pos, "position_confidence": conf, "location_method": method,
+                    "position_uncertainty_m": (SIGMA.get(method) if pos is not None else None),
+                    "spatial_confidence": (conf if pos is not None else 0.0), "fused_views": int(pos is not None),
+                    "rejected_views": 0, "grounded_views": int(method == "splat-bbox-raycast"),
                     "sightings": [sighting], "sighting_count": 1, "obs_ids": [obs_id], "last_obs_id": obs_id,
                     "bbox_last": s.get("bbox"), "first_seen": now, "last_seen": now, **links,
                     "embedding_ref": {"observation_id": obs_id, "fields": ["image_embedding", "text_embedding"]},
@@ -372,3 +411,18 @@ def find_places(scene_id: str, query: str) -> list[dict]:
             out.append({"place_id": p["place_id"], "label": place_label(scene_id, p["place_id"]),
                         "observations": len(p.get("observation_ids", []))})
     return out
+
+
+def refuse(scene_id: str) -> dict:
+    """Recompute fused positions for every object from its stored sightings (non-destructive)."""
+    coll = db.get_db()[OBJECTS]
+    n = multi = 0
+    for d in coll.find({"scene_id": scene_id}):
+        fused = fuse_position(_sightings_list(d))
+        coll.update_one({"_id": d["_id"]}, {"$set": {
+            "position": fused["position"], "location_method": fused["position_method"],
+            "position_uncertainty_m": fused["position_uncertainty_m"], "spatial_confidence": fused["spatial_confidence"],
+            "fused_views": fused["fused_views"], "rejected_views": fused["rejected_views"], "grounded_views": fused["grounded_views"]}})
+        n += 1
+        multi += fused["fused_views"] > 1
+    return {"scene_id": scene_id, "objects": n, "multi_view": multi}

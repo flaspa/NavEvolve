@@ -198,7 +198,29 @@ const cognitiveMap = createCognitiveMap({
   mount: ui.cognitiveMapPanel,
   footer: ui.cognitiveMapFooter,
   brainUrl: APP_CONFIG.brainUrl,
+  onSelectPlace: (placeId) => minimap.setHighlightedPlace(placeId),
+  onSelectObject: (objectId) => minimap.setSelectedMarker(objectId),
+  navigateTo: (name) => talk?.handle(`Take me to the ${name}`),
 });
+minimap.onMarkerSelect((m) => cognitiveMap.openObject(m));
+
+// Remembered objects on the minimap (P3). Only objects with a position are
+// drawn; grounded (splat raycast) and approximate (bearing + range) differ.
+let objectMarkers = [];
+async function pollObjectMarkers() {
+  if (!activeScene) return;
+  try {
+    const res = await fetchJson(`/objects/markers?scene_id=${encodeURIComponent(activeScene.id)}`);
+    if (!res.ok) return;
+    objectMarkers = res.body.items.map((o) => ({
+      id: o.id, name: o.name, label: o.name, x: o.position[0], y: o.position[1], z: o.position[2],
+      position: o.position, kind: o.method?.startsWith("splat") ? "grounded" : "approx", method: o.method,
+      uncertainty: o.uncertainty_m, confidence: o.confidence, sightings: o.sightings, place_id: o.place_id,
+      place_label: o.place_label, obs_ids: o.obs_ids, description: o.description,
+    }));
+    minimap.setMarkers(objectMarkers);
+  } catch (_) { /* brain offline: keep last markers */ }
+}
 
 async function pollCognitiveMap() {
   // Always scene-filtered: before the scene is active there is nothing to
@@ -207,6 +229,7 @@ async function pollCognitiveMap() {
   try {
     const res = await fetchJson(`/cognitive-map?scene_id=${encodeURIComponent(activeScene.id)}`);
     if (res.ok) cognitiveMap.update(res.body);
+    pollObjectMarkers();
   } catch (_) {
     // Brain offline: keep the last drawing.
   }
@@ -257,6 +280,8 @@ const talk = createTalk({
   getScene: () => activeScene,
   captureObservation: (trigger) => captureObservation(trigger),
   getLastFrame: () => lastEgoFrame,
+  locate: (objectId) => { minimap.setSelectedMarker(objectId); pollObjectMarkers(); },
+  markers: () => objectMarkers,
   locateBbox: (cameraSnapshot, bbox, fallbackM) => {
     const scale = { metersPerUnit: activeScene?.geometry?.metersPerUnit ?? 1, environmentScale: CONFIG.environment.scale };
     const r = measureBboxRange({ splatMesh, cameraSnapshot, bbox, ...scale });
@@ -1441,6 +1466,9 @@ window.__seekr = {
   cognitiveMap,
   agent,
   talk,
+  get objectMarkers() {
+    return objectMarkers;
+  },
   get player() {
     return player;
   },
