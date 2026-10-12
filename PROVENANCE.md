@@ -175,3 +175,23 @@ Priority 1 — autonomous exploration + narrated decisions (branch `feature/expl
   the graph with the ACTIVE policy (new graph document, history kept, policy
   unchanged); generation-guarded Stop (`taskGen`) so no pending Gemini reply
   can restart movement; path overlay cleared on stop/finish.
+
+Priority 2 — object-level semantic memory (branch `feature/object-memory`):
+- Reused from teammate **Jun Jiang** (origin/explore-local `agent_memory.py`):
+  the approximate bearing+range object position (`approx_position`, flagged
+  `image-center-approx`) used only when no splat raycast is available, and the
+  name+1 m merge rule as the starting point. Woven proxy / local MongoDB not used.
+- New in `brain/objects.py`: one 768-d Gemini Embedding 2 text vector per NEW
+  object memory ("name: description"; same configured space as perception
+  text embeddings; cached, never regenerated), per-sighting evidence
+  (`sightings[]`: observation id, bbox, position, method, confidence, time),
+  idempotent ingest (`objects_status` on the observation; reprocessing adds no
+  sightings), merge requiring same name AND (position within 1 m, or same
+  place AND description cosine ≥ 0.9), place links derived live from the
+  ACTIVE graph via stable observation ids (`place_links`, `relink` after every
+  rebuild), in-process cosine retrieval (`semantic_search`; not Atlas Vector
+  Search), `objects_in_place`, `find_places`, bounded `backfill`.
+- Talk: object-memory-first answers with place and evidence counts; place
+  contents; places-with queries; explore offer when nothing is remembered.
+  The inspector lists the selected place's objects. Observation image/text
+  embeddings, ranges, place spatial signatures and the harness are untouched.
