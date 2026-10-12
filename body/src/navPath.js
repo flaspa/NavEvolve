@@ -1,4 +1,4 @@
-// REUSED from teammate Jun Jiang's NavEvolve branch (flaspa/NavEvolve PR #1, commit 5a8b689), verbatim.
+// REUSED from teammate Jun Jiang's NavEvolve branch origin/explore-local (commit 4f50823), verbatim.
 
 /**
  * navPath.js — walkable grid over the NavMesh + A* on it.
