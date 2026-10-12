@@ -1469,6 +1469,7 @@ window.__seekr = {
   get objectMarkers() {
     return objectMarkers;
   },
+  minimap, // debug/test: markerAt(clientX, clientY), setSelectedMarker(id)
   get player() {
     return player;
   },
