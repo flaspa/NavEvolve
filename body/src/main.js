@@ -65,7 +65,7 @@ import {
 import { loadSceneProfile } from "./sceneProfile.js";
 import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
-import { measureCenterRange } from "./egoRange.js";
+import { measureCenterRange, measureBboxRange, approximateBboxPoint } from "./egoRange.js";
 import { createCognitiveMap } from "./cognitiveMap.js";
 import { createAgentControl } from "./agentControl.js";
 import { createTalk } from "./talk.js";
@@ -250,6 +250,15 @@ const talk = createTalk({
   brainUrl: APP_CONFIG.brainUrl,
   getScene: () => activeScene,
   captureObservation: (trigger) => captureObservation(trigger),
+  getLastFrame: () => lastEgoFrame,
+  locateBbox: (cameraSnapshot, bbox, fallbackM) => {
+    const scale = { metersPerUnit: activeScene?.geometry?.metersPerUnit ?? 1, environmentScale: CONFIG.environment.scale };
+    const r = measureBboxRange({ splatMesh, cameraSnapshot, bbox, ...scale });
+    if (r.point) return { position: r.point, distanceM: r.distanceM, method: r.method, confidence: 0.7 };
+    const d = Number.isFinite(fallbackM) ? fallbackM : 2;
+    return { position: approximateBboxPoint({ cameraSnapshot, bbox, distanceM: d }), distanceM: d,
+             method: "image-center-approx", confidence: 0.2 };
+  },
 });
 ui.onSubmit((text) => talk.handle(text));
 

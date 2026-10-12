@@ -25,6 +25,9 @@ Endpoints:
     POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
     POST /talk             {question, memories[]} → Gemini answer grounded in those memories
     POST /talk/intent      {text} → structured intent {intent, target} for unfamiliar phrasing
+    POST /observations/{id}/detect   Gemini object list (name, description, bbox) for one JPEG
+    POST /objects/ingest   positioned sightings → `objects` collection (linked to place graph)
+    GET  /objects          object memories of a scene, optional ?q=
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -50,6 +53,7 @@ import db  # noqa: E402  (needs the environment loaded first)
 import memory  # noqa: E402
 import perception  # noqa: E402
 import talk  # noqa: E402
+import objects  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -292,3 +296,34 @@ async def talk_intent(req: IntentRequest) -> dict:
         return await anyio.to_thread.run_sync(talk.intent, req.text)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"intent failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+@app.post("/observations/{obs_id}/detect")
+async def detect_objects(obs_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.detect, obs_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"detect failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class IngestRequest(BaseModel):
+    scene_id: str
+    observation_id: str
+    sightings: list[dict] = Field(default_factory=list)
+
+
+@app.post("/objects/ingest")
+async def ingest_objects(req: IngestRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.ingest, req.scene_id, req.observation_id, req.sightings)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.get("/objects")
+async def list_objects(scene_id: str, q: str | None = None, limit: int = 20) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(objects.search, scene_id, q, min(limit, 100))
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "total": len(items), "items": items}

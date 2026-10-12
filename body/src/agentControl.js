@@ -162,6 +162,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
           frameId: obsId ?? `${f.sceneId}-${f.timestamp}-${i}`, obsId, sceneId: f.sceneId,
           jpegDataUrl: f.dataUrl, pose: { ...o },
           camera: { fovDeg: cam.fov, aspect: cam.aspect, near: cam.near, far: cam.far },
+          cameraSnapshot: cam, // NavEvolve: exact capture camera for bbox grounding (egoRange.js)
           rangeM: range?.distanceM ?? null, ts: new Date(f.timestamp).toISOString(),
         });
         window.__seekr?.agentPanel?.frame(frames.at(-1)); // thumbnails for thoughts

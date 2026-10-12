@@ -48,9 +48,13 @@ function terms(text) {
 
 export const AGENT_NAME = "NavEvolve Agent";
 
-export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, say = ui.addMessage }) {
+export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, getLastFrame = () => null,
+  locateBbox = () => null, say = ui.addMessage }) {
   let busy = false;
   let currentGoal = null;
+  let exploring = false;
+  const EXPLORE_MAX_STEPS = 6;
+  const EXPLORE_MAX_MS = 240_000;
   const reply = (text) => say(AGENT_NAME, text);
 
   /** A backend error, distinct from "no memory": says which endpoint failed. */
@@ -127,15 +131,18 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       (hits.length > 1 ? ` (${hits.length} matching memories.)` : ""));
   }
 
-  async function navigateTo(query) {
-    if (agent.busy?.()) return reply("I'm already moving — say \"stop\" first.");
+  async function navigateTo(query, { silentMiss = false } = {}) {
+    if (agent.busy?.()) { reply("I'm already moving — say \"stop\" first."); return "busy"; }
     const { hits, loose, head } = searchLoose(await memories(), query);
-    if (!hits.length) return reply(`Not found: I have no memory of "${query}" in this scene, so I can't take you there.`);
+    if (!hits.length) {
+      if (!silentMiss) reply(`Not found: I have no memory of "${query}" in this scene, so I can't take you there.`);
+      return "no_memory";
+    }
     if (loose) reply(`I have no exact memory of "${query}", but I do remember a "${head}".`);
 
     // A real viewpoint from which the object was described; skip ones off the NavMesh.
     const target = hits.find((h) => agent.debug.onNavmesh(h.o.pose.x, h.o.pose.z));
-    if (!target) return reply(`I remember "${query}" but none of those viewpoints is on the walkable surface.`);
+    if (!target) { reply(`I remember "${query}" but none of those viewpoints is on the walkable surface.`); return "no_memory"; }
     const o = target.o;
     currentGoal = query;
     reply(`I saw "${loose ? head : query}" at ${when(o)} near ${where(o)}. Walking there now…`);
@@ -145,30 +152,146 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       result = await agent.goto({ x: o.pose.x, z: o.pose.z, stopWithin: 0.35 });
     } catch (err) {
       currentGoal = null;
-      return reply(`I couldn't start walking — ${err.message}`);
+      reply(`I couldn't start walking — ${err.message}`);
+      return "failed";
     }
-    if (currentGoal !== query) return; // stopped or replaced meanwhile
+    if (currentGoal !== query) return "stopped"; // stopped or replaced meanwhile
     if (result.status !== "arrived") {
       currentGoal = null;
-      return reply(result.status === "unreachable"
+      reply(result.status === "unreachable"
         ? `Unreachable: no NavMesh path from here to ${where(o)}.`
         : `Blocked: I stopped after ${result.pathLength} m at (${result.pose.x.toFixed(1)}, ${result.pose.z.toFixed(1)}).`);
+      return result.status;
     }
     reply(`Arrived near ${where(o)} after ${result.pathLength} m. Facing the remembered view…`);
     await agent.turn({ deg: ((o.pose.headingDeg - result.pose.headingDeg + 540) % 360) - 180 });
 
     const obs = await captureObservation("agent-arrival");
     currentGoal = null;
-    if (!obs?.id) return reply("Arrived, but I couldn't store a new view to verify against.");
+    if (!obs?.id) { reply("Arrived, but I couldn't store a new view to verify against."); return "arrived"; }
+    return (await verifyHere(obs.id, query)) ? "verified" : "arrived";
+  }
+
+  /** Gemini check of a stored observation for `query`; replies either way. */
+  async function verifyHere(obsId, query) {
+    reply(`Checking for the ${query}…`);
     try {
       const v = await getJson("/talk/verify", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ observation_id: obs.id, goal: query }),
+        body: JSON.stringify({ observation_id: obsId, goal: query }),
       });
-      reply(v.visible ? `Verified: I can see "${query}" here. ${v.reason}` : `Arrived, but not verified: I don't see "${query}" from here. ${v.reason}`);
+      reply(v.visible ? `Object verified: I can see "${query}" here. ${v.reason}` : `Not verified: I don't see "${query}" from here. ${v.reason}`);
+      return Boolean(v.visible);
     } catch (err) {
-      reply(`Arrived (verification unavailable: ${err.message}).`);
+      reply(`Verification unavailable: ${err.message}`);
+      return false;
     }
+  }
+
+  /** Detect objects in a stored frame, ground each bbox on the splat, persist to `objects`. */
+  async function detectAndRemember(obsId, frame) {
+    const r = await getJson(`/observations/${encodeURIComponent(obsId)}/detect`, { method: "POST" });
+    const sightings = r.objects.map((o) => {
+      const loc = frame?.cameraSnapshot ? locateBbox(frame.cameraSnapshot, o.bbox, frame.rangeM ?? null) : null;
+      return { ...o, position: loc?.position ?? null, range_m: loc?.distanceM ?? null,
+               method: loc?.method ?? "none", confidence: loc?.confidence ?? 0 };
+    });
+    if (sightings.length) {
+      await getJson("/objects/ingest", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id: r.scene_id, observation_id: obsId, sightings }),
+      });
+    }
+    return sightings;
+  }
+
+  const matchesQuery = (name, query) => {
+    const q = terms(query);
+    const n = String(name).toLowerCase();
+    return q.length > 0 && q.every((t) => n.includes(t)) || (q.length > 1 && n.includes(q.at(-1)));
+  };
+
+  /** Known object memory → walk to its supporting viewpoint, face it, verify. */
+  async function visitKnownObject(query) {
+    const scene = getScene();
+    const data = await getJson(`/objects?scene_id=${encodeURIComponent(scene.id)}&q=${encodeURIComponent(query)}`);
+    const known = data.items.find((o) => o.last_obs_id || (o.obs_ids ?? []).length);
+    if (!known) return "no_memory";
+    const obsId = known.last_obs_id ?? known.obs_ids.at(-1);
+    const obs = await getJson(`/observations/${encodeURIComponent(obsId)}`);
+    if (!agent.debug.onNavmesh(obs.pose.x, obs.pose.z)) return "no_memory";
+    reply(`I remember a ${known.display_name ?? known.name} (${known.sightings} sighting${known.sightings === 1 ? "" : "s"}` +
+      `${known.position ? `, approx. (${known.position[0].toFixed(1)}, ${known.position[2].toFixed(1)}), ${known.location_method}` : ""}). Walking to where I saw it…`);
+    currentGoal = query;
+    const result = await agent.goto({ x: obs.pose.x, z: obs.pose.z, stopWithin: 0.35 });
+    if (currentGoal !== query) return "stopped";
+    if (result.status !== "arrived") { reply(`Couldn't reach it (${result.status}).`); return result.status; }
+    if (known.position) await agent.face({ x: known.position[0], z: known.position[2] });
+    else await agent.turn({ deg: ((obs.pose.headingDeg - result.pose.headingDeg + 540) % 360) - 180 });
+    const captured = await captureObservation("agent-arrival");
+    currentGoal = null;
+    return captured?.id && (await verifyHere(captured.id, query)) ? "verified" : "arrived";
+  }
+
+  /** Autonomous exploration of unseen frontiers until the object is verified or the budget ends.
+   *  Each step: look around (capture, detect, remember, verify) → pick a frontier → walk. The
+   *  first look-around also seeds the visited map that frontiers() is computed from. */
+  async function explore(query) {
+    exploring = true;
+    const t0 = performance.now();
+    const tried = [];
+    let steps = 0;
+    try {
+      while (exploring && steps < EXPLORE_MAX_STEPS && performance.now() - t0 < EXPLORE_MAX_MS) {
+        const { frames } = await agent.capture({ headings: 2 });
+        if (!exploring) return false;
+        for (const f of frames) {
+          if (!f.obsId) continue;
+          reply(`Checking for the ${query}…`);
+          let sightings = [];
+          try {
+            sightings = await detectAndRemember(f.obsId, { cameraSnapshot: f.cameraSnapshot, rangeM: f.rangeM });
+          } catch (err) {
+            reply(`Object detection unavailable: ${err.message}`);
+          }
+          if (!exploring) return false;
+          const names = sightings.map((s) => s.name).filter(Boolean);
+          if (names.length) reply(`I see: ${names.slice(0, 8).join(", ")}. Remembered ${names.length} objects.`);
+          const hit = sightings.find((s) => matchesQuery(s.name, query));
+          if (hit && (await verifyHere(f.obsId, query))) return true;
+        }
+        const { frontiers, coverage } = await agent.frontiers();
+        const p = (await agent.pose()).pose;
+        const pick = frontiers
+          .filter((f) => !tried.some((t) => Math.hypot(t.x - f.x, t.z - f.z) < 0.75))
+          .map((f) => ({ ...f, d: Math.hypot(f.x - p.x, f.z - p.z) }))
+          .sort((a, b) => b.size / (1 + b.d) - a.size / (1 + a.d))[0];
+        if (!pick) { reply(`No unexplored reachable areas left (coverage ${(coverage * 100).toFixed(0)}%).`); break; }
+        steps += 1;
+        tried.push(pick);
+        reply(`Exploring an unseen area… (step ${steps}/${EXPLORE_MAX_STEPS}, frontier ${pick.d.toFixed(1)} m away, coverage ${(coverage * 100).toFixed(0)}%)`);
+        const r = await agent.goto({ x: pick.x, z: pick.z, stopWithin: 0.4 });
+        if (!exploring) return false;
+        if (r.status !== "arrived") reply(`That way was ${r.status}; trying another frontier.`);
+      }
+    } finally {
+      exploring = false;
+    }
+    reply(`Not found: I explored ${steps} unseen area${steps === 1 ? "" : "s"} without seeing a ${query}.`);
+    return false;
+  }
+
+  /** "Find X": remembered objects → remembered descriptions → autonomous exploration. */
+  async function findObject(query) {
+    reply("Searching remembered objects…");
+    let outcome = await visitKnownObject(query);
+    if (outcome === "verified" || outcome === "stopped") return;
+    if (outcome === "no_memory") {
+      outcome = await navigateTo(query, { silentMiss: true });
+      if (outcome === "verified" || outcome === "stopped" || outcome === "busy") return;
+      if (outcome === "no_memory") reply(`I have no memory of a ${query} yet.`);
+    }
+    await explore(query);
   }
 
   async function describeHere() {
@@ -190,7 +313,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       case "stop": return stop();
       case "list_places": return listPlaces();
       case "describe_here": return describeHere();
-      case "navigate": return target ? navigateTo(target) : reply("Where would you like me to go? Name something I may have seen.");
+      case "navigate": return target ? findObject(target) : reply("Where would you like me to go? Name something I may have seen.");
       case "have_seen": return target ? haveSeen(target) : freeform(text);
       default: return freeform(text);
     }
@@ -208,8 +331,9 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   }
 
   function stop() {
-    const wasMoving = agent.busy?.();
+    const wasMoving = agent.busy?.() || exploring;
     currentGoal = null;
+    exploring = false; // cancels the exploration loop at its next check
     agent.halt();
     reply(wasMoving ? "Stopped." : "Nothing to stop.");
   }
@@ -221,7 +345,10 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     if (STOP_RE.test(clean)) return { intent: "stop", clean };
     if (PLACES_RE.test(clean)) return { intent: "list_places", clean };
     const target = navigationTarget(clean);
-    if (target) return { intent: "navigate", target, clean };
+    if (target) {
+      const find = /^(please\s+|can you\s+|could you\s+)*(find|locate|look|search)\b/i.test(clean);
+      return { intent: find ? "find" : "navigate", target, clean };
+    }
     if (HERE_RE.test(clean)) return { intent: "describe_here", clean };
     if ((m = SEEN_RE.exec(clean))) return { intent: "have_seen", target: m[5], clean };
     return { intent: "unknown", clean };
@@ -235,6 +362,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     busy = true;
     try {
       if (intent === "list_places") await listPlaces();
+      else if (intent === "find") await findObject(target);
       else if (intent === "navigate") await navigateTo(target);
       else if (intent === "have_seen") await haveSeen(target);
       else if (intent === "describe_here") await describeHere();

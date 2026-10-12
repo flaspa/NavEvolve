@@ -13,6 +13,7 @@ hackathon from what was built during it.
 | `body/public/avatar/human.glb` | Supplied by the project author on hackathon day (pre-existing asset, not created in the hackathon) | Rig and clips: Idle / Walk / Run / Turn / Talk / Dance |
 | `body/src/egoRange.js`: `cameraFromSnapshot()`, `measurementMetrics()` and the Spark `SplatMesh.raycast()` ranging approach | [flaspa/scavengeai](https://github.com/flaspa/scavengeai) @ `3334d40`: `src/egocentricRange.js`, `src/sceneMeasure.js`, `handleMeasurementClick()` in `src/main.js` | Functions copied verbatim. Only `measureCenterRange()` is new |
 | `body/src/navPath.js` (NavMesh grid + A*) and `body/src/agentControl.js` (goto / turn / face / capture / halt driven through `player.setExternalMove`) | Teammate **Jun Jiang**, flaspa/NavEvolve PR #1 branch, commit `5a8b689` (hackathon day) | Copied verbatim with an attribution header; PR #1 itself was not merged. Its WebSocket agent loop (`agent_ws.py`, `body.py`, `agent.py`, `agentLink.js`) was not adopted: Milestone 6 drives navigation from the browser instead |
+| Gemini object-detection prompt (`LIST`) and the object-merge rule (same name within 1 m, averaged position, sightings count) in `brain/objects.py`; frontier exploration (`frontiers()`, `capture()` visited-marking) already in `agentControl.js` | Teammate **Jun Jiang**, flaspa/NavEvolve PR #1 (`brain/models.py`, `brain/memory.py`, `body/src/agentControl.js`, commit `5a8b689`) | Prompt copied verbatim; run through our google-genai client, not the Woven proxy. The WebSocket agent loop (`agent.py`, `agent_ws.py`, `body.py`, `agentLink.js`, `agentPanel.js`) was not adopted: exploration runs in the browser (`talk.js`) |
 | Habitat-GS validation scenes (splats, NavMeshes, `scene.seekr.json`) | `C:\Flavia\Data\seekr-world-habitat-gs-validation`, derived from `RukawaY/gs_scenes` (val) | Local only, never committed; served by the Vite middleware at `/habitat/…` |
 
 Everything that changed after the baseline: `git diff pre-hackathon-baseline`.
@@ -137,3 +138,23 @@ Conversational interface correction:
   looser memory matched, Gemini structured intent (`POST /talk/intent`) for
   unfamiliar phrasing, and backend errors reported by endpoint instead of
   "Not Found".
+
+Final integration — autonomous exploration + object memory:
+- `brain/objects.py`, `server.py`: `POST /observations/{id}/detect` (teammate's
+  Gemini LIST prompt, cached on the observation), `POST /objects/ingest`,
+  `GET /objects`. The `objects` collection stores normalised name, description,
+  approximate 3D position + confidence + `location_method`
+  (`splat-bbox-raycast` or `image-center-approx`), sightings, supporting
+  `obs_ids`, `place_id` (resolved from the latest cognitive graph when the
+  source observation belongs to a place) and an `embedding_ref` to the source
+  observation's existing 768-d vectors. No new embeddings are generated.
+- `body/src/egoRange.js`: `measureBboxRange()` casts through the bounding-box
+  centre against the splat; `approximateBboxPoint()` is the flagged fallback.
+- `body/src/talk.js`: "find X" → remembered objects → remembered descriptions
+  → autonomous frontier exploration (teammate's `frontiers()`), capturing,
+  detecting and remembering objects at each step; success only on Gemini
+  verification; bounded budget; Stop cancels exploration and motion.
+- `body/src/agentControl.js`: frames now carry the exact `cameraSnapshot`
+  (one added line) so bounding boxes can be grounded.
+- `config/appConfig.js`: `?brain=` URL override for testing against a
+  temporary backend.

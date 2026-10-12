@@ -112,3 +112,38 @@ export function measureCenterRange({ splatMesh, cameraSnapshot, metersPerUnit, e
     distanceWorld: +m.distanceWorld.toFixed(4),
   };
 }
+
+/**
+ * Distance/point of the Gaussian surface under a normalised image bbox centre
+ * ([x0,y0,x1,y1], fractions, origin top-left). Same splat raycast as the
+ * centre range, aimed at the object. Null point/distance when nothing is hit.
+ */
+export function measureBboxRange({ splatMesh, cameraSnapshot, bbox, metersPerUnit, environmentScale }) {
+  const result = { method: "splat-bbox-raycast", point: null, distanceM: null };
+  const camera = cameraFromSnapshot(cameraSnapshot);
+  if (!splatMesh || !camera || !Array.isArray(bbox) || bbox.length !== 4) return result;
+  const cx = (bbox[0] + bbox[2]) / 2;
+  const cy = (bbox[1] + bbox[3]) / 2;
+  try {
+    _raycaster.setFromCamera(new THREE.Vector2(cx * 2 - 1, 1 - cy * 2), camera);
+    const hits = _raycaster.intersectObject(splatMesh, false);
+    if (!hits.length) return result;
+    const p = hits[0].point;
+    const m = measurementMetrics(camera.position, p, { metersPerUnit, environmentScale });
+    return { ...result, point: [p.x, p.y, p.z], distanceM: +m.distanceMeters.toFixed(3) };
+  } catch (err) {
+    console.warn("[range] bbox raycast failed:", err);
+    return result;
+  }
+}
+
+/** Approximate fallback: a point `distanceM` along the bbox-centre ray (no surface hit). */
+export function approximateBboxPoint({ cameraSnapshot, bbox, distanceM }) {
+  const camera = cameraFromSnapshot(cameraSnapshot);
+  if (!camera || !Array.isArray(bbox) || bbox.length !== 4 || !Number.isFinite(distanceM)) return null;
+  const cx = (bbox[0] + bbox[2]) / 2;
+  const cy = (bbox[1] + bbox[3]) / 2;
+  _raycaster.setFromCamera(new THREE.Vector2(cx * 2 - 1, 1 - cy * 2), camera);
+  const p = _raycaster.ray.at(distanceM, new THREE.Vector3());
+  return [p.x, p.y, p.z];
+}
