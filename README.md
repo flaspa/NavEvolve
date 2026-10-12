@@ -114,7 +114,7 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 
 ## Replay Demo (presentation)
 
-Click **▶ Replay Demo** in the HUD. It is a labelled guided replay of a real
+Click **▶ Replay Demo** in the HUD, or in the Talk tab type `Tell me how you searched for the bathroom.` (grounded explanation from the saved data) and then `Give me a replay.` / `Replay that` / `Show me the replay` — the same guided replay; `Stop replay` stops it. It is a labelled guided replay of a real
 saved route: "Find the bathroom." → cached ElevenLabs narration → the avatar
 walks on the NavMesh to the remembered bathroom viewpoint → the saved
 observation and its recorded Gemini verification are shown. **■ Stop Replay**

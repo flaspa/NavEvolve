@@ -623,16 +623,27 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     reply(r.answer);
   }
 
-  /** "Tell me how you searched for the bathroom." — deterministic, from the recorded episode. */
+  /** "Tell me how you searched for the bathroom." — grounded in the saved Replay Demo data
+   *  (/replay/bathroom.json: the saved observation, its recorded Gemini verification, the route). */
   async function summarizeEpisode() {
-    const ep = (await window.__seekr?.episodeReplay?.latest?.()) ?? lastEpisode;
-    if (!ep) return reply("I have no recorded search yet. Ask me to find something first, and I'll record how it went.");
-    reply(window.__seekr.episodeReplay.summarize(ep));
+    let s;
+    try { s = await (await fetch("/replay/bathroom.json", { cache: "no-cache" })).json(); } catch (_) { s = null; }
+    if (!s) return reply("I have no saved bathroom search to explain yet.");
+    const t = s.target, v = s.verification;
+    const d = Math.hypot(s.start.x - t.x, s.start.z - t.z);
+    reply(`Here is what I can show from saved data — a guided reconstruction of remembered viewpoints, not a complete recording of an autonomous search. ` +
+      `I remember a bathroom from observation ${t.observation_id}, recorded at ${t.recorded_at} from a viewpoint near (${t.x.toFixed(1)}, ${t.z.toFixed(1)}): ${t.summary} ` +
+      (v ? `A Gemini check of that saved frame (${v.verified_at}) found the bathroom ${v.visible ? "visible" : "not visible"}: ${v.reason} ` : "") +
+      `The replay walks the NavMesh route from a remembered viewpoint near (${s.start.x.toFixed(1)}, ${s.start.z.toFixed(1)}), about ${d.toFixed(1)} m in a straight line, and then shows that saved evidence. Say "give me a replay" to watch it.`);
   }
+  /** "Give me a replay" — the SAME guided Replay Demo as the HUD button (cached narration, real walk). */
   async function startReplay() {
-    const er = window.__seekr?.episodeReplay;
-    if (!er) return reply("Replay is not available.");
-    await er.start();
+    const demo = window.__seekr?.replay;
+    if (!demo) return reply("Replay is not available.");
+    if (demo.active) return reply("The replay is already playing — say \"stop replay\" to stop it.");
+    reply("Starting the guided Replay Demo of my saved bathroom search.");
+    // Not awaited: the demo runs on its own, so Talk stays responsive for "stop replay" / "replay that".
+    demo.start().catch((err) => console.warn("[replay] demo failed:", err.message));
   }
 
   function stop() {
@@ -654,7 +665,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     let m;
     if (STOP_RE.test(clean)) return { intent: "stop", clean };
     if (/\b(tell me|explain)\b.*\bhow you (found|searched|looked|got)|why (couldn'?t|could not|didn'?t) you find|how did you (find|search|get)/i.test(clean)) return { intent: "replay_summary", clean };
-    if (/^(give me a replay|replay\b|show me how you got there|play (it )?back|show me the replay)/i.test(clean)) return { intent: "replay_start", clean };
+    if (/^(give me a replay|replay( that| it| your last search)?\b|show me( the replay| how you got there)?[.!]?$|play (it )?back)/i.test(clean)) return { intent: "replay_start", clean };
     if (/^(yes|yes please|sure|ok|okay|go ahead|do it|explore)[.!]?$/i.test(clean)) return { intent: "yes", clean };
     if (PLACES_RE.test(clean)) return { intent: "list_places", clean };
     if (EXPLORE_RE.test(clean) || EXPLORE_NOVEL_RE.test(clean)) {
