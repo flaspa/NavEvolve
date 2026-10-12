@@ -41,6 +41,7 @@ import perception
 OBJECTS = "objects"
 MERGE_M = 1.0          # teammate's rule: same name within 1 m is the same object
 SAME_DESC_COS = 0.90   # without positions: same name AND near-identical description
+SAME_OBJECT_COS = 0.80 # overlapping positions (≤ MERGE_M) AND similar description → same object, even if named differently
 LINK_M = 1.5           # viewpoint-to-place-node fallback link distance
 FUSE_M = 1.0           # a sighting farther than this from the consensus is kept as evidence but not fused
 SIGMA = {"splat-bbox-raycast": 0.35, "image-center-approx": 1.5}  # per-sighting 1-sigma radius (m)
@@ -270,9 +271,19 @@ def ingest(scene_id: str, obs_id: str, sightings: list[dict], embed: bool = True
             if dup is not None:
                 out.append({"id": str(dup["_id"]), "name": key, "duplicate": True})
                 continue
-            if embed and any(c.get("embedding") for c in candidates) and pos is None:
-                emb = _embed_text(text)  # needed to decide a merge without positions
+            # Gemini names the same object differently from frame to frame ("Crystal chandelier" /
+            # "Suspended floral chandelier"), so a name-only gate would duplicate it. Spatially
+            # overlapping memories are compared by description embedding instead.
+            nearby = [d for d in coll.find({"scene_id": scene_id, "position": {"$ne": None}})
+                      if pos is not None and d.get("position") and math.dist(d["position"], pos) <= MERGE_M
+                      and obs_id not in d.get("obs_ids", [])]
+            if embed and emb is None and (nearby or (any(c.get("embedding") for c in candidates) and pos is None)):
+                emb = _embed_text(text)
             match = next((d for d in candidates if _same_object(d, key, pos, emb, links["place_id"])), None)
+            if match is None and emb is not None and nearby:
+                scored = sorted(((_cos(d["embedding"], emb), d) for d in nearby if d.get("embedding")), key=lambda t: -t[0])
+                if scored and scored[0][0] >= SAME_OBJECT_COS:
+                    match = scored[0][1]
             sighting = {"observation_id": obs_id, "bbox": s.get("bbox"), "description": desc, "position": pos,
                         "range_m": s.get("range_m") or (obs.get("range") or {}).get("distanceM"),
                         "camera_pose": obs.get("pose"), "method": method, "confidence": conf, "seen_at": now}
