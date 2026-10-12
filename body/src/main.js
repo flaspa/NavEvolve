@@ -244,6 +244,12 @@ agent.busy = () => agentWalking;
   };
 }
 
+// Jun's agentControl publishes frames/paths to window.__seekr.agentPanel; we only
+// use the planned-path overlay on the minimap (narration lives in the Talk tab).
+window.__seekr = Object.assign(window.__seekr ?? {}, {
+  agentPanel: { frame() {}, path: (points) => minimap.setPath(points ?? []) },
+});
+
 const talk = createTalk({
   ui,
   agent,
@@ -1421,6 +1427,7 @@ startLoop(renderer, scene, camera, (delta) => {
 // Debug handle — the surfaces later integrations will use.
 // ---------------------------------------------------------------------------
 window.__seekr = {
+  ...window.__seekr,
   get scene() {
     return activeScene;
   },

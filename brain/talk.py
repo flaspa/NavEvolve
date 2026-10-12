@@ -85,3 +85,35 @@ def answer(question: str, memories: list[dict]) -> dict:
         config=types.GenerateContentConfig(temperature=0.3),
     )
     return {"answer": response.text.strip(), "model": perception.VLM_MODEL, "memories_used": len(lines)}
+
+
+# Teammate Jun Jiang's frontier-selection prompt (NavEvolve origin/explore-local,
+# brain/models.py CHOOSE, commit 4f50823), verbatim; run through our google-genai client.
+CHOOSE_PROMPT = """You are a robot navigating a house to find: {goal}
+Context: {ctx}
+The images are your most recent forward views, oldest first; the last is where you stand now. Options are places you can walk to:
+{opts}
+Pick the option most likely to lead to the goal. JSON: {{"choice": <option index>, "thought": "one or two short first-person sentences explaining your reasoning"}}"""
+
+
+def choose(goal: str, context: str, options: list[str], observation_ids: list[str]) -> dict:
+    """Gemini picks one frontier option given the agent's recent stored frames."""
+    parts = []
+    for obs_id in observation_ids[-4:]:
+        jpeg = db.get_observation(obs_id, with_image=True)
+        if jpeg:
+            parts.append(types.Part.from_bytes(data=jpeg, mime_type="image/jpeg"))
+    opts = "\n".join(f"{i}: {o}" for i, o in enumerate(options))
+    client = perception._client()
+    response = client.models.generate_content(
+        model=perception.VLM_MODEL,
+        contents=parts + [CHOOSE_PROMPT.format(goal=goal, ctx=context, opts=opts)],
+        config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.3),
+    )
+    result = json.loads(response.text)
+    try:
+        choice = int(result.get("choice", 0))
+    except (TypeError, ValueError):
+        choice = 0
+    return {"choice": choice if 0 <= choice < len(options) else 0,
+            "thought": str(result.get("thought", ""))[:300], "model": perception.VLM_MODEL}

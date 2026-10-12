@@ -49,6 +49,8 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `POST /observations/{id}/enrich` | run the Gemini description pipeline on one observation |
 | `POST /observations/{id}/detect` | Gemini object list (name, description, normalised bbox) for one stored JPEG |
 | `POST /objects/ingest` / `GET /objects?scene_id=&q=` | object-level memory (`objects` collection), linked to place nodes and source observations |
+| `POST /talk/choose` | Gemini picks a frontier from recent frames (Jun's CHOOSE prompt) |
+| `POST /cognitive-map/rebuild` | rebuild a scene's graph with the active policy; reports how one observation was placed |
 | `GET /cognitive-map` | latest cognitive graph (no vectors) + policy + harness status, drawn in the Cognitive Map panel; click a node to inspect that place's photos and descriptions |
 | `POST /sessions` | start a new capture session (observations kept) |
 | `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
@@ -103,6 +105,7 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 |---|---|
 | `Seekr, what places do you remember?` | lists the cognitive map's places with their descriptions |
 | `Have you seen a dining table?` | searches stored Gemini descriptions; reports when/where, or "no memory" |
+| `Explore this area` / `Explore a large area` / `Explore and tell me what you discover` | autonomous, narrated exploration: looks around, enriches the view, says whether it recognizes the place, picks a frontier with Gemini and explains why, walks, repeats within a bounded budget (local 3 steps / large 8), then summarizes real counts and coverage |
 | `Find the teapot` / `Find the dining table` | searches object memory, then remembered descriptions; walks there and verifies with Gemini; if nothing is known or verification fails, **explores unseen frontiers autonomously** (bounded: 6 steps / 4 min), detecting and remembering objects as it goes; reports "Object verified" or "Not found" |
 | `Take me to the place where you saw the dining table.` / `Go stand next to the big table` / `Go to the table` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
 | `What do you see here?` | captures a view and reads back Gemini's description |

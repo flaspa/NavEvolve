@@ -110,6 +110,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
     job = null;
     player.clearExternalMove();
     player.setInputEnabled(j.inputWas);
+    window.__seekr?.agentPanel?.path?.([]); // NavEvolve: clear the planned path
     j.resolve({ status, pose: pose(), pathLength: r3(j.length), path: j.path.map(([x, z]) => [r3(x), r3(z)]) });
   }
 
@@ -205,6 +206,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
       if (!cells) return fail("unreachable");
       const path = smooth(g, cells).slice(1);
       path.push([x, z]); // exact target replaces the goal cell centre
+      window.__seekr?.agentPanel?.path?.([[here.x, here.z], ...path]); // NavEvolve: minimap overlay
       let length = 0, px = here.x, pz = here.z;
       for (const [wx, wz] of path) { length += Math.hypot(wx - px, wz - pz); px = wx; pz = wz; }
       return new Promise((resolve) => {

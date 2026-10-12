@@ -158,3 +158,20 @@ Final integration — autonomous exploration + object memory:
   (one added line) so bounding boxes can be grounded.
 - `config/appConfig.js`: `?brain=` URL override for testing against a
   temporary backend.
+
+Priority 1 — autonomous exploration + narrated decisions (branch `feature/explore-narrated`):
+- Reused from teammate **Jun Jiang** (origin/explore-local, commit `4f50823`):
+  latest `agentControl.js` (smooth visible turning, frontiers, capture) and
+  `navPath.js` verbatim; the minimap planned-path/marker overlay
+  (`setPath`/`setMarkers`); the frontier-selection prompt `CHOOSE`
+  (`brain/talk.py`, verbatim, run through our Gemini client); and the loop
+  shape of her `agent.py` (observe → recall → frontiers → choose → explain →
+  walk → observe), ported to the browser in `body/src/talk.js`
+  (`runExploration`). Her thought-stream idea (`agentPanel.js`) became
+  `narrate()` in the Talk tab with `ui.addMessageWithFrame` thumbnails. Her
+  WebSocket stack, local MongoDB and Woven proxy were not adopted.
+- New: exploration modes (local / large / find) with step, time and Gemini
+  budgets; `POST /cognitive-map/rebuild` folds newly enriched observations into
+  the graph with the ACTIVE policy (new graph document, history kept, policy
+  unchanged); generation-guarded Stop (`taskGen`) so no pending Gemini reply
+  can restart movement; path overlay cleared on stop/finish.

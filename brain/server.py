@@ -28,6 +28,8 @@ Endpoints:
     POST /observations/{id}/detect   Gemini object list (name, description, bbox) for one JPEG
     POST /objects/ingest   positioned sightings → `objects` collection (linked to place graph)
     GET  /objects          object memories of a scene, optional ?q=
+    POST /talk/choose      Gemini frontier choice {goal, context, options[], observation_ids[]}
+    POST /cognitive-map/rebuild  rebuild the scene graph with the ACTIVE policy (no policy change)
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -54,6 +56,7 @@ import memory  # noqa: E402
 import perception  # noqa: E402
 import talk  # noqa: E402
 import objects  # noqa: E402
+import harness  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -327,3 +330,51 @@ async def list_objects(scene_id: str, q: str | None = None, limit: int = 20) -> 
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
     return {"scene_id": scene_id, "total": len(items), "items": items}
+
+
+class ChooseRequest(BaseModel):
+    goal: str = Field(min_length=1, max_length=200)
+    context: str = ""
+    options: list[str] = Field(min_length=1)
+    observation_ids: list[str] = Field(default_factory=list)
+
+
+@app.post("/talk/choose")
+async def talk_choose(req: ChooseRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(talk.choose, req.goal, req.context, req.options, req.observation_ids)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"choose failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+def _rebuild_graph(scene_id: str, observation_id: str | None) -> dict:
+    """Builds and persists a new graph document with the active policy; history is kept.
+    Reports how `observation_id` was placed (recognised vs. new place)."""
+    policy = harness.active_policy()
+    observations = memory.load_observations(scene_id)
+    if not observations:
+        return {"scene_id": scene_id, "places": 0, "observations": 0, "policy": policy.as_dict()}
+    graph = memory.build_graph(observations, policy)
+    graph_id = memory.save_graph(graph, policy, scene_id)
+    out = {"scene_id": scene_id, "graph_id": graph_id, "places": len(graph["places"]),
+           "observations": len(observations), "policy": policy.as_dict()}
+    if observation_id and observation_id in graph["assignment"]:
+        idx = graph["assignment"][observation_id]
+        members = graph["places"][idx]["members"]
+        decision = next((d for d in graph["decisions"] if d["observation_id"] == observation_id), {})
+        out["placement"] = {"place_id": f"p{idx}", "members": len(members),
+                            "recognized": len(members) > 1, "best_score": decision.get("best_score")}
+    return out
+
+
+class RebuildRequest(BaseModel):
+    scene_id: str
+    observation_id: str | None = None
+
+
+@app.post("/cognitive-map/rebuild")
+async def rebuild_cognitive_map(req: RebuildRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(_rebuild_graph, req.scene_id, req.observation_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc

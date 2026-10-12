@@ -36,6 +36,11 @@ export function navigationTarget(text) {
   return target || null;
 }
 const HERE_RE = /\b(what|describe).*\b(see|seeing|look|view|here|around)\b/i;
+// Free exploration: "explore this area", "explore a large area", "look around and tell me what you discover",
+// "find something you haven't seen before".
+const EXPLORE_RE = /^(please\s+|can you\s+|could you\s+|go\s+)?(explore|scout|survey|wander|map out|look around)\b/i;
+const EXPLORE_LARGE_RE = /\b(large|larger|big|bigger|whole|entire|wide|wider|everything|far|thorough)/i;
+const EXPLORE_NOVEL_RE = /\b(something|anything|places?|areas?)\s+(new|unseen|you haven'?t seen|you have not seen|i haven'?t seen)/i;
 
 const STOP_WORDS = new Set(["the", "a", "an", "of", "in", "on", "at", "to", "and", "with", "room", "place", "area", "space"]);
 
@@ -53,9 +58,34 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   let busy = false;
   let currentGoal = null;
   let exploring = false;
-  const EXPLORE_MAX_STEPS = 6;
-  const EXPLORE_MAX_MS = 240_000;
+  let taskGen = 0; // bumped on start/stop: any await that outlives its task throws Cancelled
+  class Cancelled extends Error {}
+  const guard = (gen) => { if (gen !== taskGen || !exploring) throw new Cancelled("cancelled"); };
+
+  /** Bounded exploration modes (steps, elapsed time, Gemini requests). */
+  const MODES = {
+    local: { label: "local exploration", maxSteps: 3, maxMs: 180_000, maxGemini: 14, headings: 2, enrich: true, verify: false, minSeparationM: 1.0 },
+    large: { label: "large-area exploration", maxSteps: 8, maxMs: 480_000, maxGemini: 32, headings: 2, enrich: true, verify: false, minSeparationM: 2.5 },
+    find: { label: "object search", maxSteps: 6, maxMs: 300_000, maxGemini: 30, headings: 2, enrich: false, verify: true, minSeparationM: 0.75 },
+  };
+  const EXPLORE_MAX_STEPS = MODES.find.maxSteps;
+  const EXPLORE_MAX_MS = MODES.find.maxMs;
   const reply = (text) => say(AGENT_NAME, text);
+  /** Narrated decision; with a frame, shows its thumbnail (ui.addMessageWithFrame). */
+  const narrate = (text, frame = null) => {
+    if (frame?.jpegDataUrl && ui.addMessageWithFrame) {
+      ui.addMessageWithFrame(AGENT_NAME, text, { imageDataUrl: frame.jpegDataUrl, altText: frame.obsId ?? "observation",
+        captureTime: frame.ts, obsId: frame.obsId });
+    } else reply(text);
+  };
+  const side = (p, f) => {
+    const dx = f.x - p.x, dz = f.z - p.z;
+    const h = (p.headingDeg * Math.PI) / 180;
+    const cross = dx * Math.cos(h) - dz * Math.sin(h); // app convention: heading 0 faces +Z
+    const ahead = dx * Math.sin(h) + dz * Math.cos(h);
+    if (Math.abs(cross) < 0.35 * Math.abs(ahead)) return ahead >= 0 ? "ahead" : "behind";
+    return cross > 0 ? "to the left" : "to the right";
+  };
 
   /** A backend error, distinct from "no memory": says which endpoint failed. */
   async function getJson(path, init) {
@@ -233,52 +263,168 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     return captured?.id && (await verifyHere(captured.id, query)) ? "verified" : "arrived";
   }
 
-  /** Autonomous exploration of unseen frontiers until the object is verified or the budget ends.
-   *  Each step: look around (capture, detect, remember, verify) → pick a frontier → walk. The
-   *  first look-around also seeds the visited map that frontiers() is computed from. */
-  async function explore(query) {
+  /**
+   * Autonomous exploration — the shape of Jun's agent.py loop, driven from the browser:
+   *   observe (capture + enrich + graph update) → frontiers → Gemini chooses, explains → walk → repeat.
+   * `goal` null = free exploration (local/large); a goal adds detection + visual verification (find).
+   * Every narrated line reflects a real decision or stored datum; counts are actual.
+   */
+  async function runExploration(mode, goal = null) {
+    if (exploring || agent.busy?.()) { reply("I'm already on a task — say \"stop\" first."); return false; }
+    const cfg = MODES[mode];
+    const gen = ++taskGen;
     exploring = true;
     const t0 = performance.now();
+    const stats = { steps: 0, viewpoints: 0, observations: 0, enriched: 0, gemini: 0, newPlaces: 0, recognized: 0, blocked: 0, metres: 0 };
     const tried = [];
-    let steps = 0;
-    try {
-      while (exploring && steps < EXPLORE_MAX_STEPS && performance.now() - t0 < EXPLORE_MAX_MS) {
-        const { frames } = await agent.capture({ headings: 2 });
-        if (!exploring) return false;
-        for (const f of frames) {
-          if (!f.obsId) continue;
-          reply(`Checking for the ${query}…`);
+    const visitedPts = [];
+    let coverage0 = null;
+    const gemini = () => (stats.gemini < cfg.maxGemini ? (stats.gemini += 1, true) : false);
+    const scene = getScene();
+
+    const budgetLeft = () => stats.steps < cfg.maxSteps && performance.now() - t0 < cfg.maxMs;
+
+    async function observe(label) {
+      const { frames } = await agent.capture({ headings: cfg.headings });
+      guard(gen);
+      const saved = frames.filter((f) => f.obsId);
+      stats.observations += saved.length;
+      const fwd = saved[0] ?? null;
+      if (label) narrate(label, fwd);
+      // Find mode: detect + remember objects, verify the goal in each real frame.
+      if (goal) {
+        for (const f of saved) {
+          reply(`Checking for the ${goal}…`);
           let sightings = [];
-          try {
-            sightings = await detectAndRemember(f.obsId, { cameraSnapshot: f.cameraSnapshot, rangeM: f.rangeM });
-          } catch (err) {
-            reply(`Object detection unavailable: ${err.message}`);
+          if (gemini()) {
+            try { sightings = await detectAndRemember(f.obsId, { cameraSnapshot: f.cameraSnapshot, rangeM: f.rangeM }); }
+            catch (err) { reply(`Object detection unavailable: ${err.message}`); }
           }
-          if (!exploring) return false;
-          const names = sightings.map((s) => s.name).filter(Boolean);
-          if (names.length) reply(`I see: ${names.slice(0, 8).join(", ")}. Remembered ${names.length} objects.`);
-          const hit = sightings.find((s) => matchesQuery(s.name, query));
-          if (hit && (await verifyHere(f.obsId, query))) return true;
+          guard(gen);
+          const names = sightings.map((x) => x.name).filter(Boolean);
+          if (names.length) narrate(`I can see: ${names.slice(0, 8).join(", ")}. Remembered ${names.length} objects.`, f);
+          const hit = sightings.find((x) => matchesQuery(x.name, goal));
+          if (hit) {
+            narrate(`I think I see the ${goal}. Verifying in this view…`, f);
+            if (gemini() && (await verifyHere(f.obsId, goal))) return { found: true, frame: f };
+            guard(gen);
+          }
         }
-        const { frontiers, coverage } = await agent.frontiers();
-        const p = (await agent.pose()).pose;
-        const pick = frontiers
-          .filter((f) => !tried.some((t) => Math.hypot(t.x - f.x, t.z - f.z) < 0.75))
-          .map((f) => ({ ...f, d: Math.hypot(f.x - p.x, f.z - p.z) }))
-          .sort((a, b) => b.size / (1 + b.d) - a.size / (1 + a.d))[0];
-        if (!pick) { reply(`No unexplored reachable areas left (coverage ${(coverage * 100).toFixed(0)}%).`); break; }
-        steps += 1;
-        tried.push(pick);
-        reply(`Exploring an unseen area… (step ${steps}/${EXPLORE_MAX_STEPS}, frontier ${pick.d.toFixed(1)} m away, coverage ${(coverage * 100).toFixed(0)}%)`);
-        const r = await agent.goto({ x: pick.x, z: pick.z, stopWithin: 0.4 });
-        if (!exploring) return false;
-        if (r.status !== "arrived") reply(`That way was ${r.status}; trying another frontier.`);
+        return { found: false, frame: fwd };
       }
-    } finally {
-      exploring = false;
+      // Free exploration: enrich the forward frame through the existing perception pipeline,
+      // then fold it into the cognitive graph with the ACTIVE policy (no policy change).
+      if (cfg.enrich && fwd && gemini()) {
+        try {
+          const e = await getJson(`/observations/${encodeURIComponent(fwd.obsId)}/enrich`, { method: "POST" });
+          guard(gen);
+          stats.enriched += 1;
+          const summary = e.description?.summary ?? e.description_text?.split("\n")[0];
+          if (summary) narrate(`I can see ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`, fwd);
+          const g = await getJson("/cognitive-map/rebuild", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ scene_id: scene.id, observation_id: fwd.obsId }),
+          });
+          guard(gen);
+          const pl = g.placement;
+          if (pl?.recognized) { stats.recognized += 1; reply(`This observation resembles a place I remember (${pl.place_id}, ${pl.members} observations, similarity ${pl.best_score?.toFixed(2)}).`); }
+          else if (pl) { stats.newPlaces += 1; reply(`I don't recognize this viewpoint${pl.best_score != null ? ` (best match ${pl.best_score.toFixed(2)})` : ""}. Recording a new place (${pl.place_id}). The map now has ${g.places} places.`); }
+        } catch (err) {
+          if (err instanceof Cancelled) throw err;
+          reply(`Perception unavailable for this view: ${err.message}`);
+        }
+      }
+      return { found: false, frame: fwd };
     }
-    reply(`Not found: I explored ${steps} unseen area${steps === 1 ? "" : "s"} without seeing a ${query}.`);
-    return false;
+
+    async function chooseFrontier(frontiers, pose, recentObsIds, coverage) {
+      const near = (f) => visitedPts.some((v) => Math.hypot(v.x - f.x, v.z - f.z) < cfg.minSeparationM);
+      const options = frontiers
+        .filter((f) => !tried.some((t) => Math.hypot(t.x - f.x, t.z - f.z) < 0.75))
+        .map((f) => ({ ...f, d: Math.hypot(f.x - pose.x, f.z - pose.z), far: !near(f) }))
+        .sort((a, b) => (b.far - a.far) || (b.size / (1 + b.d) - a.size / (1 + a.d)))
+        .slice(0, 6);
+      if (!options.length) return null;
+      const describe = (f) => `frontier ${f.d.toFixed(1)} m ${side(pose, f)}, size ${f.size}${f.far ? "" : " (near a place I already visited)"}`;
+      let choice = 0, thought = null;
+      if (options.length > 1 && recentObsIds.length && gemini()) {
+        try {
+          const ctx = `Mode: ${cfg.label}. Visited ${stats.viewpoints} viewpoints, recorded ${stats.observations} observations, coverage ${(coverage * 100).toFixed(0)}%.` +
+            (goal ? "" : " Prefer large unexplored regions and distinct new areas over places already seen.");
+          const c = await getJson("/talk/choose", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ goal: goal ?? "unexplored areas of this space", context: ctx, options: options.map(describe), observation_ids: recentObsIds }),
+          });
+          guard(gen);
+          choice = c.choice ?? 0; thought = c.thought || null;
+        } catch (err) {
+          if (err instanceof Cancelled) throw err;
+          console.warn("[explore] choose fallback:", err.message);
+        }
+      }
+      const pick = options[Math.min(Math.max(choice, 0), options.length - 1)];
+      reply(thought ? `${thought} (${describe(pick)})` : `Heading for the ${describe(pick)} — the largest reachable unexplored region.`);
+      return pick;
+    }
+
+    try {
+      narrate(goal ? `Searching for the ${goal}. Looking around first.` : `Starting ${cfg.label}. Looking around first.`);
+      const recent = [];
+      let first = await observe(null);
+      if (first.frame?.obsId) recent.push(first.frame.obsId);
+      if (first.found) return true;
+      while (budgetLeft()) {
+        guard(gen);
+        const { frontiers, coverage } = await agent.frontiers();
+        guard(gen);
+        if (coverage0 === null) coverage0 = coverage;
+        const pose = (await agent.pose()).pose;
+        reply(frontiers.length ? `I see ${frontiers.length} possible unexplored region${frontiers.length === 1 ? "" : "s"} (coverage ${(coverage * 100).toFixed(0)}%).`
+          : `No reachable unexplored regions left (coverage ${(coverage * 100).toFixed(0)}%).`);
+        if (!frontiers.length) break;
+        const pick = await chooseFrontier(frontiers, pose, recent.slice(-4), coverage);
+        if (!pick) { reply("Every remaining frontier is one I already tried."); break; }
+        tried.push(pick);
+        stats.steps += 1;
+        reply(`I'm moving toward the next viewpoint (step ${stats.steps}/${cfg.maxSteps}).`);
+        const r = await agent.goto({ x: pick.x, z: pick.z, stopWithin: 0.4 });
+        guard(gen);
+        stats.metres += r.pathLength ?? 0;
+        if (r.status !== "arrived") { stats.blocked += 1; reply(`That way was ${r.status} after ${(r.pathLength ?? 0).toFixed(1)} m; I'll try another direction.`); continue; }
+        stats.viewpoints += 1;
+        visitedPts.push({ x: r.pose.x, z: r.pose.z });
+        const o = await observe("I've reached a new area. Looking around.");
+        if (o.frame?.obsId) recent.push(o.frame.obsId);
+        if (o.found) return true;
+      }
+      return false;
+    } catch (err) {
+      if (err instanceof Cancelled) return false;
+      reply(`Exploration error — ${err.message}`);
+      return false;
+    } finally {
+      const cancelled = gen !== taskGen || !exploring;
+      if (gen === taskGen) exploring = false;
+      const { frontiers = [], coverage = null } = cancelled ? {} : await agent.frontiers().catch(() => ({}));
+      const cov = coverage0 !== null && coverage !== null ? ` Coverage ${(coverage0 * 100).toFixed(0)}% → ${(coverage * 100).toFixed(0)}%.` : "";
+      const mem = cfg.enrich ? ` ${stats.enriched} enriched into memory: ${stats.newPlaces} new place${stats.newPlaces === 1 ? "" : "s"}, ${stats.recognized} recognized.` : "";
+      reply(`${cancelled ? "Exploration stopped." : "Exploration complete."} I visited ${stats.viewpoints} viewpoint${stats.viewpoints === 1 ? "" : "s"} over ${stats.metres.toFixed(1)} m and recorded ${stats.observations} observation${stats.observations === 1 ? "" : "s"}.${mem}${cov}${stats.blocked ? ` ${stats.blocked} route${stats.blocked === 1 ? " was" : "s were"} blocked.` : ""}${!cancelled && frontiers.length ? ` ${frontiers.length} unexplored region${frontiers.length === 1 ? "" : "s"} remain.` : ""} Gemini requests: ${stats.gemini}.`);
+    }
+  }
+
+  /** "Explore this area" / "Explore a large area". */
+  async function exploreArea(mode = "local") {
+    await runExploration(mode, null);
+  }
+
+  /** Object search exploration (existing find behaviour, now narrated and budgeted). */
+  async function explore(query) {
+    const found = await runExploration("find", query);
+    if (!found && exploring === false && taskGen) {
+      // runExploration already printed the summary; make the outcome explicit.
+      reply(`Not found: I did not see a ${query}.`);
+    }
+    return found;
   }
 
   /** "Find X": remembered objects → remembered descriptions → autonomous exploration. */
@@ -289,7 +435,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     if (outcome === "no_memory") {
       outcome = await navigateTo(query, { silentMiss: true });
       if (outcome === "verified" || outcome === "stopped" || outcome === "busy") return;
-      if (outcome === "no_memory") reply(`I have no memory of a ${query} yet.`);
+      if (outcome === "no_memory") reply(`I have no memory of a ${query} yet. Exploring to look for it.`);
     }
     await explore(query);
   }
@@ -334,8 +480,10 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const wasMoving = agent.busy?.() || exploring;
     currentGoal = null;
     exploring = false; // cancels the exploration loop at its next check
-    agent.halt();
-    reply(wasMoving ? "Stopped." : "Nothing to stop.");
+    taskGen += 1;      // any in-flight step of the old task throws Cancelled when it resumes
+    agent.halt();      // stops the walk now and restores manual input
+    window.__seekr?.agentPanel?.path?.([]);
+    reply(wasMoving ? "Stopped. Manual control restored; observations already saved are kept." : "Nothing to stop.");
   }
 
   /** Rule-based routing; returns the matched intent for inspection. */
@@ -344,6 +492,9 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     let m;
     if (STOP_RE.test(clean)) return { intent: "stop", clean };
     if (PLACES_RE.test(clean)) return { intent: "list_places", clean };
+    if (EXPLORE_RE.test(clean) || EXPLORE_NOVEL_RE.test(clean)) {
+      return { intent: "explore", mode: EXPLORE_LARGE_RE.test(clean) ? "large" : "local", clean };
+    }
     const target = navigationTarget(clean);
     if (target) {
       const find = /^(please\s+|can you\s+|could you\s+)*(find|locate|look|search)\b/i.test(clean);
@@ -355,13 +506,14 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   }
 
   async function handle(text) {
-    const { intent, target, clean } = parse(text);
+    const { intent, target, mode, clean } = parse(text);
     say("You", text);
     if (intent === "stop") return stop();
     if (busy) return reply("One moment — I'm still working on the previous request (or say \"stop\").");
     busy = true;
     try {
       if (intent === "list_places") await listPlaces();
+      else if (intent === "explore") await exploreArea(mode);
       else if (intent === "find") await findObject(target);
       else if (intent === "navigate") await navigateTo(target);
       else if (intent === "have_seen") await haveSeen(target);
@@ -382,5 +534,5 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     }
   }
 
-  return { handle, parse, stop, search, terms, navigationTarget };
+  return { handle, parse, stop, search, terms, navigationTarget, exploreArea, get exploring() { return exploring; } };
 }
