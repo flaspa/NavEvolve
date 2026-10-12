@@ -34,6 +34,7 @@ Endpoints:
     POST /objects/relink   refresh cached place links from the active graph
     POST /objects/backfill bounded detect+ingest of enriched observations (?limit=)
     POST /objects/refuse   recompute fused positions from stored sightings
+    POST /objects/embed-missing  bounded 768-d embeddings for pre-P2 object memories
     GET  /objects/markers  minimap markers: id, name, position, method, uncertainty, place
     POST /talk/choose      Gemini frontier choice {goal, context, options[], observation_ids[]}
     POST /cognitive-map/rebuild  rebuild the scene graph with the ACTIVE policy (no policy change)
@@ -460,3 +461,11 @@ async def object_markers(scene_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
     return {"scene_id": scene_id, "total": len(items), "items": items}
+
+
+@app.post("/objects/embed-missing")
+async def embed_missing_objects(scene_id: str, limit: int = 100) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.embed_missing, scene_id, min(limit, 300))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"embed-missing failed: {type(exc).__name__}: {exc}"[:300]) from exc

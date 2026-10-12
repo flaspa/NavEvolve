@@ -370,14 +370,20 @@ def semantic_search(scene_id: str, query: str, k: int = 5, min_score: float = 0.
     graph = _latest_graph(scene_id)
     scored = []
     for d in db.get_db()[OBJECTS].find({"scene_id": scene_id}):
-        if not d.get("embedding"):
-            continue
-        score = _cos(d["embedding"], q)
         hay = f"{d['name']} {d.get('description', '')}".lower()
+        name_hit = bool(qterms) and all(t in d["name"] for t in qterms)
+        if d.get("embedding"):
+            score = _cos(d["embedding"], q)
+        elif name_hit:
+            score = 0.6  # legacy memory without an embedding: name match only (see embed_missing)
+        else:
+            continue
         if qterms and all(t in hay for t in qterms):
             score += 0.15
+        if name_hit:
+            score += 0.1
         elif qterms and any(t in d["name"] for t in qterms):
-            score += 0.08
+            score += 0.05
         scored.append((score, d))
     scored.sort(key=lambda s: -s[0])
     items = []
@@ -426,3 +432,15 @@ def refuse(scene_id: str) -> dict:
         n += 1
         multi += fused["fused_views"] > 1
     return {"scene_id": scene_id, "objects": n, "multi_view": multi}
+
+
+def embed_missing(scene_id: str, limit: int = 100) -> dict:
+    """Bounded backfill: one 768-d text embedding for each object memory created before P2."""
+    coll = db.get_db()[OBJECTS]
+    n = 0
+    for d in coll.find({"scene_id": scene_id, "embedding": None}).limit(limit):
+        emb = _embed_text(f"{d.get('display_name', d['name'])}: {d.get('description', '')}".strip(": "))
+        coll.update_one({"_id": d["_id"]}, {"$set": {"embedding": emb, "embedding_model": perception.EMBEDDING_MODEL,
+                                                     "embedding_dim": len(emb)}})
+        n += 1
+    return {"scene_id": scene_id, "embedded": n, "remaining": coll.count_documents({"scene_id": scene_id, "embedding": None})}
