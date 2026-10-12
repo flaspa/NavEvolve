@@ -213,3 +213,13 @@ Priority 3 — spatial fusion + interactive object map (branch `feature/spatial-
   uncertainty, place, supporting thumbnails, navigate-to-viewpoint); selecting
   a place highlights its objects on the minimap; Talk answers "where is X" with
   uncertainty wording, "what objects are near X", and highlights the marker.
+
+Replay Demo (presentation):
+- `body/src/replay.js`, HUD buttons in `ui.js`, `brain/scripts/build_replay.py`,
+  `body/public/replay/` (script JSON, saved evidence JPEG, cached MP3s). A
+  clearly labelled guided replay of a REAL saved route: the avatar walks with
+  the same A*/NavMesh controller from a remembered viewpoint to the remembered
+  bathroom viewpoint while cached ElevenLabs narration (voice "Matilda",
+  `eleven_turbo_v2_5`) plays. Evidence and the Gemini verification shown were
+  recorded once at build time from the saved observation; playback makes no
+  Gemini, MongoDB or ElevenLabs calls.

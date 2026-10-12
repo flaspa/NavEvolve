@@ -112,6 +112,16 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 | `Stop.` | halts the walk immediately; WASD is restored |
 | anything else | Gemini classifies the intent (`POST /talk/intent`); if it is none of the above, Gemini answers grounded only in matching memories |
 
+## Replay Demo (presentation)
+
+Click **▶ Replay Demo** in the HUD. It is a labelled guided replay of a real
+saved route: "Find the bathroom." → cached ElevenLabs narration → the avatar
+walks on the NavMesh to the remembered bathroom viewpoint → the saved
+observation and its recorded Gemini verification are shown. **■ Stop Replay**
+(or WASD / typing "stop") halts it; the button then reads **↻ Replay Again**.
+Assets are built once with `cd brain && .venv/Scripts/python scripts/build_replay.py`
+(needs `ELEVENLABS_API_KEY` in `brain/.env`); playback needs no backend.
+
 ## Controls
 
 WASD move (Shift run) · mouse / arrows look · V first/third person ·

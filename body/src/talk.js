@@ -558,6 +558,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   }
 
   function stop() {
+    if (window.__seekr?.replay?.active) { window.__seekr.replay.stop(); return; }
     const wasMoving = agent.busy?.() || exploring;
     currentGoal = null;
     exploring = false; // cancels the exploration loop at its next check

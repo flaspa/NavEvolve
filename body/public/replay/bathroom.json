@@ -1,0 +1,45 @@
+{
+  "label": "Replay Demo \u2014 guided replay of saved viewpoints and a recorded route",
+  "scene_id": "interior_0759_839979",
+  "voice": {
+    "provider": "elevenlabs",
+    "voice_id": "XrExE9yKIg1WjnnlVkGX",
+    "model": "eleven_turbo_v2_5"
+  },
+  "user_message": "Find the bathroom.",
+  "start": {
+    "observation_id": "6acc0ae4fffb00e8c51f1e74",
+    "x": -3.388,
+    "z": 1.989,
+    "headingDeg": 272.8
+  },
+  "target": {
+    "observation_id": "6acc125a90f37b9f3001f0a2",
+    "x": 2.082,
+    "z": 1.646,
+    "headingDeg": 89.3,
+    "recorded_at": "3:48 PM",
+    "timestamp": 1791758938589,
+    "room_type": "bathroom",
+    "summary": "The image shows a high-end bathroom dominated by a monochrome palette. A scenic traditional Asian landscape mural covers the back wall, complemented by an adjoining matte black wall and striking black-veined white marble flooring.",
+    "range_m": 3.023
+  },
+  "verification": {
+    "goal": "bathroom",
+    "visible": true,
+    "reason": "A bathroom sink and marble surfaces are visible in the foreground.",
+    "model": "gemini-3.8-flash",
+    "verified_at": "2026-10-11 18:57",
+    "source": "talk.verify on the saved JPEG"
+  },
+  "lines": {
+    "intro": "Searching my memory for a bathroom. I remember one: I recorded it at 3:48 PM from a viewpoint near 2.1, 1.6. This is a replay of a saved route, not a live run.",
+    "walk": "Planning a path on the NavMesh and walking there now.",
+    "mid": "I'm crossing the showroom. The remembered bathroom viewpoint is just ahead.",
+    "arrive": "I've arrived at the remembered viewpoint and turned to face the recorded view.",
+    "evidence": "Here is what I recorded there. The image shows a high-end bathroom dominated by a monochrome palette. A scenic traditional Asian landscape mural covers the back wall, complemented by an adjoining matte black wall and striking black-veined white marble flooring. Recorded Gemini verification: visible \u2014 A bathroom sink and marble surfaces are visible in the foreground.",
+    "done": "Replay complete. Manual control is restored.",
+    "stop": "Replay stopped. Manual control is restored."
+  },
+  "built_at": "2026-10-11 18:57"
+}

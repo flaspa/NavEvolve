@@ -67,6 +67,11 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
       <div class="hud-pos" data-role="captures">Observations: —</div>
       <a class="hud-link" href="http://localhost:8000/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
+      <div class="hud-replay" data-role="replay">
+        <button type="button" data-role="replay-start" title="Guided replay of a saved route with cached narration">▶ Replay Demo</button>
+        <button type="button" data-role="replay-stop" hidden>■ Stop Replay</button>
+        <span class="hud-replay-badge" data-role="replay-badge" hidden>REPLAY DEMO</span>
+      </div>
       <div class="hud-view">
         <button type="button" data-mode="first">1st Person</button>
         <button type="button" data-mode="third">3rd Person</button>
@@ -95,6 +100,9 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const cameraPosEl = root.querySelector('[data-role="camera-pos"]');
   const helpEl = root.querySelector('[data-role="help"]');
   const capturesEl = root.querySelector('[data-role="captures"]');
+  const replayStartBtn = root.querySelector('[data-role="replay-start"]');
+  const replayStopBtn = root.querySelector('[data-role="replay-stop"]');
+  const replayBadge = root.querySelector('[data-role="replay-badge"]');
   const viewButtons = [...root.querySelectorAll(".hud-view button")];
 
   let viewChangeHandler = null;
@@ -806,6 +814,19 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     /** Active camera world position, labelled by camera mode. */
     setCameraPosition(mode, x, y, z) {
       cameraPosEl.textContent = formatCameraPosition(mode, x, y, z);
+    },
+
+    /** Replay Demo controls: handlers + active state (button labels switch to "Replay Again"). */
+    onReplay({ start, stop }) {
+      replayStartBtn.addEventListener("click", (e) => { e.stopPropagation(); start(); });
+      replayStopBtn.addEventListener("click", (e) => { e.stopPropagation(); stop(); });
+    },
+    setReplayActive(active) {
+      replayStopBtn.hidden = !active;
+      replayBadge.hidden = !active;
+      replayStartBtn.disabled = active;
+      if (!active && replayStartBtn.dataset.played) replayStartBtn.textContent = "↻ Replay Again";
+      if (active) replayStartBtn.dataset.played = "1";
     },
 
     /** Observation counter line (captures this session / stored in MongoDB). */

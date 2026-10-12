@@ -69,6 +69,7 @@ import { measureCenterRange, measureBboxRange, approximateBboxPoint } from "./eg
 import { createCognitiveMap } from "./cognitiveMap.js";
 import { createAgentControl } from "./agentControl.js";
 import { createTalk } from "./talk.js";
+import { createReplay } from "./replay.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -293,11 +294,22 @@ const talk = createTalk({
 });
 ui.onSubmit((text) => talk.handle(text));
 
+// Replay Demo (presentation): guided replay of a saved route with cached narration.
+const replay = createReplay({
+  ui,
+  agent,
+  getScene: () => activeScene,
+  loadScene: (id) => loadSceneById(id),
+  isBusy: () => agentWalking || talk.exploring,
+  onStateChange: (on) => ui.setReplayActive(on),
+});
+ui.onReplay({ start: () => replay.start(), stop: () => replay.stop() });
+
 // Real user WASD takes control back from a walk in progress (isTrusted: only
 // genuine input can do this), exactly as "stop" would.
 window.addEventListener("keydown", (event) => {
-  if (!agentWalking || !event.isTrusted || isTyping()) return;
-  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) talk.stop();
+  if ((!agentWalking && !replay.active) || !event.isTrusted || isTyping()) return;
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) { if (!replay.stop()) talk.stop(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -1466,6 +1478,7 @@ window.__seekr = {
   cognitiveMap,
   agent,
   talk,
+  replay,
   get objectMarkers() {
     return objectMarkers;
   },

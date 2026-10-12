@@ -1387,3 +1387,41 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ── Replay Demo controls ────────────────────────────────────────────────── */
+.hud-replay {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  pointer-events: auto;
+}
+
+.hud-replay button {
+  padding: 4px 10px;
+  border: 1px solid rgba(224, 196, 138, 0.5);
+  border-radius: 6px;
+  background: rgba(224, 196, 138, 0.12);
+  color: #f0dcae;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.hud-replay button:hover:not([disabled]) {
+  background: rgba(224, 196, 138, 0.25);
+}
+
+.hud-replay button[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hud-replay-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(224, 120, 80, 0.85);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+}
