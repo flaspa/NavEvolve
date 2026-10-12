@@ -223,3 +223,7 @@ Replay Demo (presentation):
   `eleven_turbo_v2_5`) plays. Evidence and the Gemini verification shown were
   recorded once at build time from the saved observation; playback makes no
   Gemini, MongoDB or ElevenLabs calls.
+
+Harness Evolution view (read-only): `body/src/harnessView.js`, Harness tab in
+`ui.js`, `GET /harness/history` and `?graph_id=` on `GET /cognitive-map`.
+Reuses the existing Cognitive Map rendering; no new frameworks; no writes.

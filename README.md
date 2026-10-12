@@ -112,6 +112,15 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 | `Stop.` | halts the walk immediately; WASD is restored |
 | anything else | Gemini classifies the intent (`POST /talk/intent`); if it is none of the above, Gemini answers grounded only in matching memories |
 
+## Harness Evolution tab (read-only)
+
+The **Harness** tab in the sidebar reads `harness_policies`, `harness_runs` and
+`cognitive_graphs`: policy weights and thresholds, each optimisation run's
+selection vs held-out metrics before/after (with the honest verdict), and a
+selector of saved graphs that re-renders the Cognitive Map panel and reports
+how place grouping changed between versions. It never reruns the harness or
+mutates data. The tab also lists which fields to chart in MongoDB Atlas Charts.
+
 ## Replay Demo (presentation)
 
 Click **▶ Replay Demo** in the HUD, or in the Talk tab type `Tell me how you searched for the bathroom.` (grounded explanation from the saved data) and then `Give me a replay.` / `Replay that` / `Show me the replay` — the same guided replay; `Stop replay` stops it. It is a labelled guided replay of a real

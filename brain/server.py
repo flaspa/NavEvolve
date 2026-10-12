@@ -20,7 +20,8 @@ Endpoints:
     GET  /observations/{id}/image.jpg  the stored JPEG
     GET  /gallery          contact-sheet view of stored observations
     POST /sessions         start a new capture session (observations kept)
-    GET  /cognitive-map    latest cognitive graph + harness status/policy
+    GET  /cognitive-map    latest cognitive graph + harness status/policy (?graph_id= for a saved one)
+    GET  /harness/history  read-only policies, optimisation runs, saved graphs
     POST /observations/{id}/enrich   Gemini description for one observation (perception.py)
     POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
     POST /talk             {question, memories[]} → Gemini answer grounded in those memories
@@ -242,18 +243,61 @@ async def clear_observations(request: Request, expected: int, scene_id: str | No
     return {"ok": True, "deleted": deleted, "scene_id": scene_id}
 
 
-def _cognitive_map(scene_id: str | None) -> dict:
+def _graph_by_id(graph_id: str) -> dict | None:
+    from bson import ObjectId
+    doc = db.get_db()[memory.GRAPHS].find_one({"_id": ObjectId(graph_id)},
+                                              {"places.image_embedding": 0, "places.text_embedding": 0, "decisions": 0})
+    if doc:
+        doc["id"] = str(doc.pop("_id"))
+        doc["built_at"] = doc["built_at"].isoformat()
+    return doc
+
+
+def _cognitive_map(scene_id: str | None, graph_id: str | None = None) -> dict:
     status = db.get_db()["harness_runs"].find_one({"_id": "status"}, {"_id": 0}) or {"status": "idle"}
     if isinstance(status.get("updated_at"), datetime):
         status["updated_at"] = status["updated_at"].isoformat()
-    return {"graph": memory.latest_graph(scene_id), "harness": status}
+    graph = _graph_by_id(graph_id) if graph_id else memory.latest_graph(scene_id)
+    return {"graph": graph, "harness": status}
+
+
+def _harness_history() -> dict:
+    """Read-only: policies, optimisation runs and the list of saved graphs."""
+    d = db.get_db()
+
+    def clean(doc):
+        doc = dict(doc)
+        doc.pop("_id", None)
+        for k, v in list(doc.items()):
+            if isinstance(v, datetime):
+                doc[k] = v.isoformat()
+        return doc
+
+    policies = [clean(p) for p in d["harness_policies"].find({}, sort=[("version", 1)])]
+    runs = [clean(r) for r in d["harness_runs"].find({"_id": {"$ne": "status"}}, {"fixed_revisits": 0, "new_false_merges": 0},
+                                                   sort=[("ran_at", 1)])]
+    graphs = []
+    for g in d[memory.GRAPHS].find({}, {"places.observation_ids": 1, "edges": 1, "policy": 1, "built_at": 1, "scene_id": 1},
+                                   sort=[("built_at", 1)]):
+        graphs.append({"id": str(g["_id"]), "built_at": g["built_at"].isoformat(), "scene_id": g["scene_id"], "policy": g["policy"],
+                       "places": len(g["places"]), "edges": len(g.get("edges", [])),
+                       "observations": sum(len(p.get("observation_ids", [])) for p in g["places"])})
+    return {"policies": policies, "runs": runs, "graphs": graphs}
+
+
+@app.get("/harness/history")
+async def harness_history() -> dict:
+    try:
+        return await anyio.to_thread.run_sync(_harness_history)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
 
 
 @app.get("/cognitive-map")
-async def cognitive_map(scene_id: str | None = None) -> dict:
-    """Read-only: places (no vectors), traversal edges, policy and harness status."""
+async def cognitive_map(scene_id: str | None = None, graph_id: str | None = None) -> dict:
+    """Read-only: places (no vectors), edges, policy, harness status; graph_id selects a saved graph."""
     try:
-        return await anyio.to_thread.run_sync(_cognitive_map, scene_id)
+        return await anyio.to_thread.run_sync(_cognitive_map, scene_id, graph_id)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
 

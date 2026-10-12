@@ -126,7 +126,7 @@ export function createCognitiveMap({ mount, footer, brainUrl = "", onSelectPlace
     const baseline = h.baseline_version ? `v${h.baseline_version}` : "before";
     const metric = h.metric_label ?? "score";
     footer.policy.textContent =
-      `Active policy: ${version ? `v${version}` : "—"} · ${metric}: ${baseline} ${fmt(h.score_before)} → ` +
+      `${h.view_label ?? "Active policy"}: ${version ? `v${version}` : "—"} · ${metric}: ${baseline} ${fmt(h.score_before)} → ` +
       `${version ? `v${version}` : "after"} ${fmt(h.score_after)} · ${g?.places?.length ?? 0} places`;
     footer.policy.title = h.last_result ?? "";
     footer.harness.textContent = `Harness: ${h.status ?? "idle"}`;

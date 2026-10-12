@@ -136,8 +136,10 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="panel-tabs">
         <button type="button" data-tab="controls" class="active">Controls</button>
         <button type="button" data-tab="chat">Talk</button>
+        <button type="button" data-tab="harness">Harness</button>
       </div>
       <div class="panel-body" data-tab-panel="controls"></div>
+      <div class="panel-body hidden" data-tab-panel="harness"></div>
       <div class="panel-body hidden" data-tab-panel="chat">
         <div class="chat-tools">
           <button type="button" class="chat-copy" data-role="copy-chat"
@@ -226,6 +228,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const tabButtons = [...sidebar.querySelectorAll(".panel-tabs button")];
   const tabPanels = [...sidebar.querySelectorAll("[data-tab-panel]")];
   const cognitiveMapPanel = sidebar.querySelector('[data-role="cognitive-map-body"]');
+  const harnessPanel = sidebar.querySelector('[data-tab-panel="harness"]');
   const cognitiveMapFooter = {
     policy: sidebar.querySelector('[data-role="policy-version"]'),
     harness: sidebar.querySelector('[data-role="harness-status"]'),
@@ -250,11 +253,13 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   /** The extra class for a speaker, or null. Unknown speakers stay default. */
   const chatRoleClass = (from) => CHAT_ROLE_CLASS[from] ?? null;
 
+  let tabShownHandler = null;
   function showTab(name) {
     for (const b of tabButtons)
       b.classList.toggle("active", b.dataset.tab === name);
     for (const p of tabPanels)
       p.classList.toggle("hidden", p.dataset.tabPanel !== name);
+    tabShownHandler?.(name);
   }
   for (const b of tabButtons) {
     b.addEventListener("click", () => showTab(b.dataset.tab));
@@ -882,6 +887,8 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     /** Body of the Cognitive Map panel below the minimap (next milestone). */
     cognitiveMapPanel,
     cognitiveMapFooter,
+    harnessPanel,
+    onTabShown(fn) { tabShownHandler = fn; },
 
     buildControls,
     getControlMount,

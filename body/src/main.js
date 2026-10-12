@@ -71,6 +71,7 @@ import { createAgentControl } from "./agentControl.js";
 import { createTalk } from "./talk.js";
 import { createReplay } from "./replay.js";
 import { createEpisodeReplay } from "./episodeReplay.js";
+import { createHarnessView } from "./harnessView.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -237,8 +238,19 @@ async function pollCognitiveMap() {
   }
 }
 
+let cognitiveMapFrozen = false; // true while the Harness tab shows a saved graph
 pollCognitiveMap();
-setInterval(pollCognitiveMap, 10_000);
+setInterval(() => { if (!cognitiveMapFrozen) pollCognitiveMap(); }, 10_000);
+
+// Harness Evolution tab (read-only): history tables + saved graphs rendered in the same Cognitive Map panel.
+const harnessView = createHarnessView({
+  mount: ui.harnessPanel,
+  brainUrl: APP_CONFIG.brainUrl,
+  getScene: () => activeScene,
+  cognitiveMap: { update: (data) => { cognitiveMapFrozen = true; cognitiveMap.update(data); } },
+  onLiveMap: () => { cognitiveMapFrozen = false; pollCognitiveMap(); },
+});
+ui.onTabShown((name) => { if (name === "harness") harnessView.load(); });
 
 // Talk to Seekr (hackathon): typed instructions → memory lookup → navigation.
 // Navigation reuses the teammate's agentControl (A* over the NavMesh grid);
