@@ -21,7 +21,8 @@ Endpoints:
     GET  /gallery          contact-sheet view of stored observations
     POST /sessions         start a new capture session (observations kept)
     GET  /cognitive-map    latest cognitive graph + harness status/policy (?graph_id= for a saved one)
-    GET  /harness/history  read-only policies, optimisation runs, saved graphs
+    GET  /harness/history  read-only policies, optimisation runs, saved graphs, status
+    GET  /harness          Harness Evolution dashboard (static, read-only)
     POST /observations/{id}/enrich   Gemini description for one observation (perception.py)
     POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
     POST /talk             {question, memories[]} → Gemini answer grounded in those memories
@@ -195,6 +196,12 @@ async def observation_image(obs_id: str) -> Response:
     return Response(content=jpeg, media_type="image/jpeg")
 
 
+@app.get("/harness", include_in_schema=False)
+async def harness_dashboard() -> FileResponse:
+    """Static read-only dashboard; it reads /harness/history and /cognitive-map?graph_id=."""
+    return FileResponse(_HERE / "harness.html", media_type="text/html")
+
+
 @app.get("/gallery", include_in_schema=False)
 async def gallery() -> FileResponse:
     """Static contact sheet; it reads the two observation endpoints above."""
@@ -282,7 +289,8 @@ def _harness_history() -> dict:
         graphs.append({"id": str(g["_id"]), "built_at": g["built_at"].isoformat(), "scene_id": g["scene_id"], "policy": g["policy"],
                        "places": len(g["places"]), "edges": len(g.get("edges", [])),
                        "observations": sum(len(p.get("observation_ids", [])) for p in g["places"])})
-    return {"policies": policies, "runs": runs, "graphs": graphs}
+    status = d["harness_runs"].find_one({"_id": "status"}, {"_id": 0}) or {"status": "idle"}
+    return {"policies": policies, "runs": runs, "graphs": graphs, "status": clean(status)}
 
 
 @app.get("/harness/history")

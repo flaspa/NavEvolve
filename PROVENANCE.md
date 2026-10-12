@@ -227,3 +227,7 @@ Replay Demo (presentation):
 Harness Evolution view (read-only): `body/src/harnessView.js`, Harness tab in
 `ui.js`, `GET /harness/history` and `?graph_id=` on `GET /cognitive-map`.
 Reuses the existing Cognitive Map rendering; no new frameworks; no writes.
+- `brain/harness.html` + `GET /harness`: standalone Harness Evolution dashboard
+  (same style as the gallery); the graph drawing is a copy of the
+  `cognitiveMap.js` routine; `/harness/history` now also returns the status
+  record (idle/running, last result, time).

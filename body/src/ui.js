@@ -67,6 +67,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
       <div class="hud-pos" data-role="captures">Observations: —</div>
       <a class="hud-link" href="http://localhost:8000/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
+      <a class="hud-link" href="http://localhost:8000/harness" target="_blank" rel="noopener">Harness Evolution ↗</a>
       <div class="hud-replay" data-role="replay">
         <button type="button" data-role="replay-start" title="Guided replay of a saved route with cached narration">▶ Replay Demo</button>
         <button type="button" data-role="replay-stop" hidden>■ Stop Replay</button>

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NavEvolve Harness Evolution</title>
+<style>
+  :root { --bg: #15161a; --film: #050505; --ink: #e8e8ee; --dim: #8b8d96; --accent: #e0c48a; --blue: #9ecbff; --up: #9fe39f; --down: #f0a0a0; --card: #1c1e24; --line: #2a2c33; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 16px; padding: 12px 16px;
+           background: rgba(21, 22, 26, 0.95); border-bottom: 1px solid var(--line); }
+  h1 { margin: 0; font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+  h2 { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); margin: 0 0 10px; }
+  #status { color: var(--dim); }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.4px; }
+  .pill.idle { background: rgba(159, 227, 159, 0.15); color: var(--up); }
+  .pill.running { background: rgba(224, 196, 138, 0.2); color: var(--accent); }
+  button { margin-left: auto; padding: 6px 14px; border: 1px solid #3a3d46; border-radius: 6px; background: #22242b; color: var(--ink); cursor: pointer; }
+  button:hover { background: #2c2f38; }
+  main { padding: 16px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; overflow-x: auto; }
+  .card.wide { grid-column: 1 / -1; }
+  .note { font-size: 11.5px; color: var(--dim); line-height: 1.5; }
+  .note code, td code { color: var(--accent); font: 11px ui-monospace, Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 600; font-size: 11px; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.active td { color: var(--accent); }
+  .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--dim); }
+  .weights { display: flex; gap: 2px; height: 10px; border-radius: 3px; overflow: hidden; min-width: 120px; }
+  .weights span { display: block; height: 100%; }
+  .w-v { background: #9ecbff; } .w-s { background: #e0c48a; } .w-r { background: #ff78c8; }
+  .legend { font-size: 11px; color: var(--dim); display: flex; gap: 12px; margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .run { border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+  .run-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; margin-bottom: 8px; flex-wrap: wrap; }
+  .verdict { margin-top: 8px; font-size: 12px; font-weight: 600; }
+  .bars { display: grid; grid-template-columns: 90px 1fr 56px; gap: 4px 8px; align-items: center; font-size: 11px; margin: 6px 0; }
+  .bar { position: relative; height: 12px; background: #0e0f12; border-radius: 3px; overflow: hidden; }
+  .bar b { position: absolute; left: 0; top: 0; bottom: 0; }
+  .bar.before b { background: #4a4f5c; } .bar.after b { background: var(--blue); } .bar.after.sel b { background: var(--accent); }
+  .maps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .map { background: #0e0f12; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+  .map canvas { width: 100%; height: 260px; display: block; }
+  .map .cap { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  select { padding: 5px 8px; border: 1px solid #3a3d46; border-radius: 6px; background: #22242b; color: var(--ink); font-size: 12px; max-width: 100%; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .diff { font-size: 12px; color: var(--accent); margin-top: 8px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .kpi { background: #0e0f12; border-radius: 6px; padding: 10px; }
+  .kpi .v { font-size: 20px; font-weight: 700; } .kpi .l { font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Harness Evolution</h1>
+  <span id="status">Loading…</span>
+  <button id="refresh" type="button">Refresh</button>
+</header>
+<main>
+  <section class="card wide">
+    <div class="kpis" id="kpis"></div>
+    <p class="note">Read-only view of <code>harness_policies</code>, <code>harness_runs</code> and <code>cognitive_graphs</code>.
+      Metrics are revisit-pair scores on pose-derived reference pairs (same viewpoint ≤ 1.5 m & ≤ 45°; different ≥ 3 m).
+      The <b>selection</b> split is what the harness optimises on; the <b>held-out</b> split is only measured afterwards.
+      A selection gain is <u>not</u> evidence of generalisation or of better navigation. Nothing on this page starts a run or changes data.</p>
+  </section>
+  <section class="card"><h2>Policies</h2><div id="policies"></div>
+    <div class="legend"><span><i class="w-v"></i>visual</span><span><i class="w-s"></i>semantic</span><span><i class="w-r"></i>range</span></div></section>
+  <section class="card"><h2>Optimisation runs</h2><div id="runs"></div></section>
+  <section class="card wide"><h2>Cognitive graph by policy version</h2>
+    <div class="row">A: <select id="gA"></select> B: <select id="gB"></select></div>
+    <div class="maps"><div class="map"><canvas id="cA"></canvas><div class="cap" id="capA"></div></div><div class="map"><canvas id="cB"></canvas><div class="cap" id="capB"></div></div></div>
+    <div class="diff" id="diff"></div>
+    <p class="note">Nodes are places (number = observations; gold = revisited); lines are traversal edges. Positions are display-only (from pose), never a recognition input.
+      Atlas Charts: data source <code>navevolve</code> → line <code>harness_policies.held_out_score</code>/<code>selection_score</code> by <code>version</code>; table <code>harness_runs</code> (<code>before.held_out.f1</code>, <code>after.held_out.f1</code>, <code>result</code>, filter <code>_id ≠ "status"</code>); bar <code>cognitive_graphs</code> place count by <code>policy.version</code>.</p>
+  </section>
+</main>
+<script>
+  // Reuses the existing read-only API: GET /harness/history, GET /cognitive-map?graph_id=…
+  const $ = (id) => document.getElementById(id);
+  const fmt = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : "—");
+  const time = (iso) => (iso ? new Date(iso).toLocaleTimeString() : "—");
+  const delta = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? b - a : null);
+  const cls = (d) => (d == null ? "flat" : d > 0.0005 ? "up" : d < -0.0005 ? "down" : "flat");
+  const sign = (d) => (d == null ? "—" : `${d >= 0 ? "+" : ""}${d.toFixed(3)}`);
+  let H = null;
+  const graphCache = new Map();
+
+  async function getJson(p) { const r = await fetch(p, { cache: "no-cache" }); if (!r.ok) throw new Error(`HTTP ${r.status} ${p}`); return r.json(); }
+
+  function renderKpis(h) {
+    const st = h.status ?? {};
+    const active = h.policies.at(-1);
+    const last = h.runs.at(-1);
+    $("kpis").innerHTML = [
+      [`v${active?.version ?? "—"}`, "active policy"],
+      [h.policies.length, "policy versions"],
+      [h.runs.length, "optimisation runs"],
+      [h.graphs.length, "saved graphs"],
+      [last ? fmt(last.after?.held_out?.[last.objective === "f1" ? "f1" : "score"] ?? last.before.held_out[last.objective === "f1" ? "f1" : "score"]) : "—", last ? `held-out ${last.objective === "f1" ? "revisit F1" : "balanced acc."} (latest run)` : "no run"],
+      [h.graphs.at(-1)?.places ?? "—", "places in latest graph"],
+    ].map(([v, l]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+    $("status").innerHTML = `<span class="pill ${st.status === "running" ? "running" : "idle"}">${(st.status ?? "idle").toUpperCase()}</span>
+      &nbsp;last run ${last ? time(last.ran_at) : "—"}${st.last_result ? ` · ${st.last_result}` : ""}`;
+  }
+
+  function renderPolicies(h) {
+    const activeV = h.policies.at(-1)?.version;
+    $("policies").innerHTML = `<table><thead><tr><th>v</th><th>weights (visual · semantic · range)</th><th>thr</th><th>objective</th><th>sel.</th><th>held-out</th><th>adopted</th></tr></thead><tbody>${
+      h.policies.map((p) => `<tr class="${p.version === activeV ? "active" : ""}"><td>v${p.version}${p.version === activeV ? " ●" : ""}${p.parent ? `<br><small style="color:var(--dim)">from v${p.parent}</small>` : ""}</td>
+        <td><div class="weights" title="visual ${p.w_visual} · semantic ${p.w_semantic} · range ${p.w_range}"><span class="w-v" style="width:${p.w_visual * 100}%"></span><span class="w-s" style="width:${p.w_semantic * 100}%"></span><span class="w-r" style="width:${p.w_range * 100}%"></span></div>
+            <small style="color:var(--dim)">${p.w_visual} · ${p.w_semantic} · ${p.w_range}</small></td>
+        <td>${p.threshold}</td><td>${p.objective ?? (p.parent ? "balanced acc." : "initial")}</td>
+        <td>${fmt(p.selection_score)}</td><td>${fmt(p.held_out_score)}</td><td>${time(p.adopted_at)}</td></tr>`).join("")}</tbody></table>`;
+  }
+
+  function bars(label, before, after, sel) {
+    const w = (v) => `${Math.max(0, Math.min(1, v ?? 0)) * 100}%`;
+    return `<div class="bars"><div>${label} before</div><div class="bar before"><b style="width:${w(before)}"></b></div><div>${fmt(before)}</div>
+      <div>${label} after</div><div class="bar after ${sel ? "sel" : ""}"><b style="width:${w(after)}"></b></div><div>${fmt(after)}</div></div>`;
+  }
+
+  function renderRuns(h) {
+    if (!h.runs.length) { $("runs").innerHTML = `<p class="note">No optimisation runs recorded yet.</p>`; return; }
+    $("runs").innerHTML = h.runs.map((r) => {
+      const f1 = r.objective === "f1"; const key = f1 ? "f1" : "score"; const name = f1 ? "revisit F1" : "balanced accuracy";
+      const sb = r.before.selection, hb = r.before.held_out, sa = r.after?.selection, ha = r.after?.held_out;
+      const dS = delta(sb[key], sa?.[key]), dH = delta(hb[key], ha?.[key]);
+      const verdict = !r.adopted ? ["flat", "No candidate beat the baseline — nothing adopted."]
+        : dH > 0.0005 ? ["up", `Held-out ${name} improved (${sign(dH)}).`]
+        : ["down", `Selection improved (${sign(dS)}) but held-out did not (${sign(dH)}) — no demonstrated generalisation.`];
+      return `<div class="run"><div class="run-head"><span><b>v${r.policy_before.version} → v${r.policy_after.version}</b> · ${time(r.ran_at)}</span>
+          <span>objective <b>${name}</b> · ${r.candidates_evaluated ?? "?"} candidates · ${r.observations} obs · ${r.reference_pairs?.revisits_held_out ?? "?"} held-out revisits</span></div>
+        ${bars("selection", sb[key], sa?.[key], true)}${bars("held-out", hb[key], ha?.[key], false)}
+        <table><thead><tr><th></th><th>missed revisits</th><th>false merges</th><th>precision</th><th>recall</th></tr></thead><tbody>
+          <tr><td>selection</td><td>${sb.missed_revisits} → ${sa?.missed_revisits ?? "—"}</td><td>${sb.false_merges} → ${sa?.false_merges ?? "—"}</td><td>${fmt(sb.precision)} → ${fmt(sa?.precision)}</td><td>${fmt(sb.recall)} → ${fmt(sa?.recall)}</td></tr>
+          <tr><td><b>held-out</b></td><td>${hb.missed_revisits} → ${ha?.missed_revisits ?? "—"}</td><td>${hb.false_merges} → ${ha?.false_merges ?? "—"}</td><td>${fmt(hb.precision)} → ${fmt(ha?.precision)}</td><td>${fmt(hb.recall)} → ${fmt(ha?.recall)}</td></tr>
+        </tbody></table>
+        <div class="verdict ${verdict[0]}">${verdict[1]}</div><div class="note">Recorded result: “${r.result}” · graph after run: ${r.places} places, ${r.edges} edges</div></div>`;
+    }).join("");
+  }
+
+  // Same drawing as body/src/cognitiveMap.js (nodes sized by observation count, gold when revisited; traversal edges).
+  function drawGraph(canvas, graph) {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+    const places = graph?.places ?? []; if (!places.length) return;
+    const xs = places.map((p) => p.display_xz[0]), zs = places.map((p) => p.display_xz[1]), pad = 18;
+    const spanX = Math.max(1e-3, Math.max(...xs) - Math.min(...xs)), spanZ = Math.max(1e-3, Math.max(...zs) - Math.min(...zs));
+    const s = Math.min((w - 2 * pad) / spanX, (h - 2 * pad) / spanZ);
+    const ox = (w - spanX * s) / 2 - Math.min(...xs) * s, oz = (h - spanZ * s) / 2 - Math.min(...zs) * s;
+    const pos = new Map(places.map((p) => [p.place_id, [p.display_xz[0] * s + ox, p.display_xz[1] * s + oz]]));
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(158, 203, 255, 0.55)";
+    for (const e of graph.edges ?? []) { const a = pos.get(e.from), b = pos.get(e.to); if (!a || !b) continue; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    ctx.font = "600 10px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const p of places) { const [x, y] = pos.get(p.place_id), n = p.observation_ids.length, r = 6 + Math.min(8, (n - 1) * 2.5);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = n > 1 ? "rgba(224, 196, 138, 0.95)" : "rgba(158, 203, 255, 0.9)"; ctx.fill();
+      ctx.fillStyle = "#15161a"; ctx.fillText(String(n), x, y + 0.5); }
+  }
+
+  function assignmentDiff(a, b) {
+    const members = (g) => { const m = new Map(); for (const p of g.places) { const key = [...p.observation_ids].sort().join(","); for (const o of p.observation_ids) m.set(o, key); } return m; };
+    const ma = members(a), mb = members(b); let shared = 0, changed = 0;
+    for (const [o, k] of mb) if (ma.has(o)) { shared++; if (ma.get(o) !== k) changed++; }
+    return { shared, changed, added: [...mb.keys()].filter((o) => !ma.has(o)).length, removed: [...ma.keys()].filter((o) => !mb.has(o)).length };
+  }
+
+  async function graphById(id) {
+    if (!graphCache.has(id)) graphCache.set(id, (await getJson(`/cognitive-map?graph_id=${encodeURIComponent(id)}`)).graph);
+    return graphCache.get(id);
+  }
+
+  async function renderMaps() {
+    const a = $("gA").value, b = $("gB").value; if (!a || !b) return;
+    const [ga, gb] = await Promise.all([graphById(a), graphById(b)]);
+    drawGraph($("cA"), ga); drawGraph($("cB"), gb);
+    const cap = (g) => `policy v${g.policy.version} (visual ${g.policy.w_visual} · semantic ${g.policy.w_semantic} · range ${g.policy.w_range} · thr ${g.policy.threshold}) · ${g.places.length} places · ${g.edges.length} edges · ${g.places.reduce((s, p) => s + p.observation_ids.length, 0)} observations · built ${time(g.built_at)}`;
+    $("capA").textContent = "A — " + cap(ga); $("capB").textContent = "B — " + cap(gb);
+    const d = assignmentDiff(ga, gb);
+    $("diff").textContent = `A → B: places ${ga.places.length} → ${gb.places.length}, edges ${ga.edges.length} → ${gb.edges.length}; ${d.changed} of ${d.shared} shared observations changed place grouping; ${d.added} observations only in B, ${d.removed} only in A.`;
+  }
+
+  function renderGraphPickers(h) {
+    const opts = h.graphs.map((g) => `<option value="${g.id}">${time(g.built_at)} · v${g.policy.version} · ${g.places} places · ${g.edges} edges · ${g.observations} obs</option>`).join("");
+    $("gA").innerHTML = opts; $("gB").innerHTML = opts;
+    if (h.graphs.length) { $("gA").selectedIndex = 0; $("gB").selectedIndex = h.graphs.length - 1; }
+    $("gA").onchange = renderMaps; $("gB").onchange = renderMaps;
+    renderMaps();
+  }
+
+  async function load() {
+    $("status").textContent = "Loading…";
+    try {
+      H = await getJson("/harness/history");
+      renderKpis(H); renderPolicies(H); renderRuns(H); renderGraphPickers(H);
+    } catch (err) { $("status").textContent = `Could not load harness data — ${err.message}`; }
+  }
+  $("refresh").addEventListener("click", load);
+  window.addEventListener("resize", () => renderMaps());
+  load();
+</script>
+</body>
+</html>

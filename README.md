@@ -51,6 +51,7 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `POST /objects/ingest` / `GET /objects?scene_id=&q=` | object-level memory (`objects` collection), linked to place nodes and source observations |
 | `POST /talk/choose` | Gemini picks a frontier from recent frames (Jun's CHOOSE prompt) |
 | `POST /cognitive-map/rebuild` | rebuild a scene's graph with the active policy; reports how one observation was placed |
+| `GET /harness` | Harness Evolution dashboard (static, read-only); data from `GET /harness/history` and `GET /cognitive-map?graph_id=` |
 | `GET /cognitive-map` | latest cognitive graph (no vectors) + policy + harness status, drawn in the Cognitive Map panel; click a node to inspect that place's photos and descriptions |
 | `POST /sessions` | start a new capture session (observations kept) |
 | `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
@@ -112,9 +113,13 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 | `Stop.` | halts the walk immediately; WASD is restored |
 | anything else | Gemini classifies the intent (`POST /talk/intent`); if it is none of the above, Gemini answers grounded only in matching memories |
 
-## Harness Evolution tab (read-only)
+## Harness Evolution (read-only)
 
-The **Harness** tab in the sidebar reads `harness_policies`, `harness_runs` and
+**Harness Evolution ↗** in the HUD opens `http://localhost:8000/harness`, a standalone
+dashboard in the Observation Gallery style: active policy and status, policy history with
+weights, each optimisation run's selection vs held-out metrics before/after with an explicit
+verdict, and two saved cognitive graphs side by side with a grouping diff. The **Harness** tab
+in the sidebar shows the same data inline and reads `harness_policies`, `harness_runs` and
 `cognitive_graphs`: policy weights and thresholds, each optimisation run's
 selection vs held-out metrics before/after (with the honest verdict), and a
 selector of saved graphs that re-renders the Cognitive Map panel and reports
