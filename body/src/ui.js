@@ -146,6 +146,14 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
                   title="Clear the chat transcript shown here. Navigation, the active goal and brain state are not affected.">Clear chat</button>
           <span class="chat-copy-note" data-role="copy-chat-note" aria-live="polite"></span>
         </div>
+        <div class="replay-bar" data-role="replay-bar" hidden>
+          <span class="replay-bar-label">RECORDED REPLAY</span>
+          <button type="button" data-role="ep-play">▶ Play</button>
+          <button type="button" data-role="ep-pause">⏸ Pause</button>
+          <button type="button" data-role="ep-stop">■ Stop</button>
+          <button type="button" data-role="ep-mute">🔊</button>
+          <button type="button" data-role="ep-speed">1×</button>
+        </div>
         <div class="chat-log" data-role="log"></div>
         <form class="chat-row" data-role="form">
           <input type="text" data-role="input" placeholder="Talk to NavEvolve Agent… (Enter)" autocomplete="off" />
@@ -815,6 +823,31 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     setCameraPosition(mode, x, y, z) {
       cameraPosEl.textContent = formatCameraPosition(mode, x, y, z);
     },
+
+    /** Recorded Replay playback bar (Talk tab). */
+    onEpisodeControls({ play, stop, pause, resume, mute, speed }) {
+      const bar = sidebar.querySelector('[data-role="replay-bar"]');
+      bar.hidden = false;
+      const q = (r) => sidebar.querySelector(`[data-role="${r}"]`);
+      let playing = false, paused = false, spd = 1;
+      q("ep-play").addEventListener("click", () => { showTab("chat"); play(); });
+      q("ep-stop").addEventListener("click", () => stop());
+      q("ep-pause").addEventListener("click", () => (paused ? resume() : pause()));
+      q("ep-mute").addEventListener("click", () => mute());
+      q("ep-speed").addEventListener("click", () => { spd = spd === 1 ? 1.5 : 1; speed(spd); });
+      this.setEpisodeControls = ({ active, paused: p, muted, speed: s }) => {
+        playing = active; paused = p;
+        q("ep-play").textContent = active ? "▶ Playing…" : "↻ Replay Again";
+        q("ep-play").disabled = active;
+        q("ep-pause").disabled = !active;
+        q("ep-pause").textContent = p ? "▶ Resume" : "⏸ Pause";
+        q("ep-stop").disabled = !active;
+        q("ep-mute").textContent = muted ? "🔇" : "🔊";
+        q("ep-speed").textContent = `${s}×`;
+      };
+      this.setEpisodeControls({ active: false, paused: false, muted: false, speed: 1 });
+    },
+    setEpisodeControls() {},
 
     /** Replay Demo controls: handlers + active state (button labels switch to "Replay Again"). */
     onReplay({ start, stop }) {

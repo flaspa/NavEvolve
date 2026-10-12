@@ -70,6 +70,7 @@ import { createCognitiveMap } from "./cognitiveMap.js";
 import { createAgentControl } from "./agentControl.js";
 import { createTalk } from "./talk.js";
 import { createReplay } from "./replay.js";
+import { createEpisodeReplay } from "./episodeReplay.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -256,6 +257,12 @@ const agent = createAgentControl({
 });
 let agentWalking = false;
 agent.busy = () => agentWalking;
+// Synchronous pose for the episode recorder (agent.pose() is async by contract).
+agent.poseSync = () => {
+  if (!player) return null;
+  const p = player.getAgentPose();
+  return { x: p.position.x, z: p.position.z, headingDeg: quaternionToHeadingDeg(p.rotation) };
+};
 {
   const goto = agent.goto;
   agent.goto = async (args) => {
@@ -305,11 +312,29 @@ const replay = createReplay({
 });
 ui.onReplay({ start: () => replay.start(), stop: () => replay.stop() });
 
+// Recorded Replay of the last real "find" episode (conversational: "give me a replay").
+const baseWalk = CONFIG.player.thirdPerson.walkSpeed;
+const episodeReplay = createEpisodeReplay({
+  ui,
+  agent,
+  getScene: () => activeScene,
+  loadScene: (id) => loadSceneById(id),
+  isBusy: () => agentWalking || talk.exploring || replay.active,
+  onState: (st) => ui.setEpisodeControls(st),
+  setSpeed: (s) => player?.setTuning({ walkSpeed: baseWalk * s, runSpeed: CONFIG.player.thirdPerson.runSpeed * s }),
+});
+window.__seekr = Object.assign(window.__seekr ?? {}, { episodeReplay });
+ui.onEpisodeControls({
+  play: () => episodeReplay.start(), stop: () => episodeReplay.stop(),
+  pause: () => episodeReplay.pause(), resume: () => episodeReplay.resume(),
+  mute: () => episodeReplay.toggleMute(), speed: (s) => episodeReplay.setPlaybackSpeed(s),
+});
+
 // Real user WASD takes control back from a walk in progress (isTrusted: only
 // genuine input can do this), exactly as "stop" would.
 window.addEventListener("keydown", (event) => {
-  if ((!agentWalking && !replay.active) || !event.isTrusted || isTyping()) return;
-  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) { if (!replay.stop()) talk.stop(); }
+  if ((!agentWalking && !replay.active && !episodeReplay.active) || !event.isTrusted || isTyping()) return;
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) { if (!episodeReplay.stop() && !replay.stop()) talk.stop(); }
 });
 
 // ---------------------------------------------------------------------------

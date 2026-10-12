@@ -74,9 +74,55 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   };
   const EXPLORE_MAX_STEPS = MODES.find.maxSteps;
   const EXPLORE_MAX_MS = MODES.find.maxMs;
-  const reply = (text) => say(AGENT_NAME, text);
+  // ── Episode recorder (Recorded Replay) ──────────────────────────────────
+  // Records what the live "find" run actually did: start pose, sampled pose
+  // trajectory, every agent line with the pose/trajectory index it was said at,
+  // captured observation ids, memory decisions, verification and final status.
+  let episode = null, sampler = null;
+  const posNow = () => { try { const p = agent.poseSync?.(); return p; } catch (_) { return null; } };
+  function recStart(goal) {
+    const p = agent.poseSync?.();
+    if (!p) return;
+    episode = { episode_id: `ep-${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`, scene_id: getScene()?.id,
+      goal, started_at: Date.now(), start: { x: p.x, z: p.z, headingDeg: p.headingDeg }, trajectory: [], events: [], status: "running" };
+    sampler = setInterval(() => { const q = agent.poseSync?.(); if (q && episode) episode.trajectory.push({ t: Date.now() - episode.started_at, x: +q.x.toFixed(3), z: +q.z.toFixed(3), headingDeg: +q.headingDeg.toFixed(1) }); }, 250);
+    recEvent({ kind: "user", from: "You", text: `Find the ${goal}.`, speak: false });
+  }
+  const QUIET = /^(Checking for the|I can see:|Remembered \d|I see \d+ possible|I'm moving toward|One moment)/;
+  function recEvent(e) {
+    if (!episode) return;
+    if (e.speak && QUIET.test(e.text ?? "")) e = { ...e, speak: false };
+    const q = agent.poseSync?.();
+    episode.events.push({ ...e, t: Date.now() - episode.started_at, traj_index: Math.max(0, episode.trajectory.length - 1),
+      pose: q ? { x: +q.x.toFixed(3), z: +q.z.toFixed(3), headingDeg: +q.headingDeg.toFixed(1) } : null });
+  }
+  async function recEnd(status) {
+    if (!episode) return;
+    clearInterval(sampler); sampler = null;
+    const ep = episode; episode = null;
+    ep.status = status; ep.ended_at = Date.now();
+    const q = agent.poseSync?.(); ep.final_pose = q ? { x: q.x, z: q.z, headingDeg: q.headingDeg } : null;
+    // Waypoints: trajectory decimated to ~0.6 m, plus every pose an agent line was said at.
+    const wp = []; let last = null;
+    ep.trajectory.forEach((p, i) => { if (!last || Math.hypot(p.x - last.x, p.z - last.z) >= 0.6) { wp.push({ x: p.x, z: p.z, traj_index: i }); last = p; } });
+    for (const e of ep.events) if (e.kind === "arrive" || e.kind === "verify") { const p = ep.trajectory[e.traj_index]; if (p) wp.push({ x: p.x, z: p.z, headingDeg: p.headingDeg, traj_index: e.traj_index }); }
+    wp.sort((a, b) => a.traj_index - b.traj_index);
+    ep.waypoints = wp.filter((w, i) => !i || w.traj_index !== wp[i - 1].traj_index);
+    lastEpisode = ep;
+    try { localStorage.setItem("navevolve.lastEpisode", JSON.stringify(ep)); } catch (_) { /* */ }
+    try {
+      const r = await getJson("/replay/episodes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ episode: ep }) });
+      window.__seekr?.episodeReplay?.invalidate?.();
+      console.log("[episode] saved", r);
+    } catch (err) { console.warn("[episode] not saved on the backend:", err.message); }
+  }
+  let lastEpisode = null;
+  try { lastEpisode = JSON.parse(localStorage.getItem("navevolve.lastEpisode") || "null"); } catch (_) { /* */ }
+
+  const reply = (text, rec = {}) => { say(AGENT_NAME, text); recEvent({ kind: "say", text, speak: true, ...rec }); };
   /** Narrated decision; with a frame, shows its thumbnail (ui.addMessageWithFrame). */
-  const narrate = (text, frame = null) => {
+  const narrate = (text, frame = null, rec = {}) => {
+    recEvent({ kind: frame?.obsId ? "capture" : "say", text, speak: true, obs_id: frame?.obsId ?? null, ...rec });
     if (frame?.jpegDataUrl && ui.addMessageWithFrame) {
       ui.addMessageWithFrame(AGENT_NAME, text, { imageDataUrl: frame.jpegDataUrl, altText: frame.obsId ?? "observation",
         captureTime: frame.ts, obsId: frame.obsId });
@@ -113,7 +159,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   /** Enriched observations of the active scene, newest first (metadata only). */
   async function memories() {
     const scene = getScene();
-    const data = await getJson(`/observations?limit=100${scene ? `&scene_id=${encodeURIComponent(scene.id)}` : ""}`);
+    const data = await getJson(`/observations?limit=500${scene ? `&scene_id=${encodeURIComponent(scene.id)}` : ""}`);
     return data.items.filter((o) => o.perception?.status === "done" && o.description_text);
   }
 
@@ -223,15 +269,18 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       reply(result.status === "unreachable"
         ? `Unreachable: no NavMesh path from here to ${where(o)}.`
         : `Blocked: I stopped after ${result.pathLength} m at (${result.pose.x.toFixed(1)}, ${result.pose.z.toFixed(1)}).`);
+      _lastOutcome = result.status;
       return result.status;
     }
-    reply(`Arrived near ${where(o)} after ${result.pathLength} m. Facing the remembered view…`);
+    reply(`Arrived near ${where(o)} after ${result.pathLength} m. Facing the remembered view…`, { kind: "arrive" });
     await agent.turn({ deg: ((o.pose.headingDeg - result.pose.headingDeg + 540) % 360) - 180 });
 
     const obs = await captureObservation("agent-arrival");
     currentGoal = null;
     if (!obs?.id) { reply("Arrived, but I couldn't store a new view to verify against."); return "arrived"; }
-    return (await verifyHere(obs.id, query)) ? "verified" : "arrived";
+    const ok = await verifyHere(obs.id, query);
+    _lastOutcome = ok ? "found (verified)" : "arrived, not verified";
+    return ok ? "verified" : "arrived";
   }
 
   /** Gemini check of a stored observation for `query`; replies either way. */
@@ -242,7 +291,8 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ observation_id: obsId, goal: query }),
       });
-      reply(v.visible ? `Object verified: I can see "${query}" here. ${v.reason}` : `Not verified: I don't see "${query}" from here. ${v.reason}`);
+      reply(v.visible ? `Object verified: I can see "${query}" here. ${v.reason}` : `Not verified: I don't see "${query}" from here. ${v.reason}`,
+        { kind: "verify", visible: Boolean(v.visible), reason: v.reason, obs_id: obsId });
       return Boolean(v.visible);
     } catch (err) {
       reply(`Verification unavailable: ${err.message}`);
@@ -327,11 +377,13 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const obs = await getJson(`/observations/${encodeURIComponent(obsId)}`);
     if (!agent.debug.onNavmesh(obs.pose.x, obs.pose.z)) return "no_memory";
     reply(`I remember a ${known.display_name ?? known.name}${placePhrase(known)} (${evidencePhrase(known)}` +
-      `${known.position ? `, approx. (${known.position[0].toFixed(1)}, ${known.position[2].toFixed(1)}), ${known.location_method}` : ""}). Walking to where I saw it…`);
+      `${known.position ? `, approx. (${known.position[0].toFixed(1)}, ${known.position[2].toFixed(1)}), ${known.location_method}` : ""}). Walking to where I saw it…`,
+      { kind: "memory" });
     currentGoal = query;
     const result = await agent.goto({ x: obs.pose.x, z: obs.pose.z, stopWithin: 0.35 });
     if (currentGoal !== query) return "stopped";
     if (result.status !== "arrived") { reply(`Couldn't reach it (${result.status}).`); return result.status; }
+    reply(`Arrived at the viewpoint where I saw the ${known.display_name ?? known.name} (${result.pathLength} m).`, { kind: "arrive" });
     if (known.position) await agent.face({ x: known.position[0], z: known.position[2] });
     else await agent.turn({ deg: ((obs.pose.headingDeg - result.pose.headingDeg + 540) % 360) - 180 });
     const captured = await captureObservation("agent-arrival");
@@ -474,6 +526,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
         if (r.status !== "arrived") { stats.blocked += 1; reply(`That way was ${r.status} after ${(r.pathLength ?? 0).toFixed(1)} m; I'll try another direction.`); continue; }
         stats.viewpoints += 1;
         visitedPts.push({ x: r.pose.x, z: r.pose.z });
+        recEvent({ kind: "arrive", text: null, speak: false });
         const o = await observe("I've reached a new area. Looking around.");
         if (o.frame?.obsId) recent.push(o.frame.obsId);
         if (o.found) return true;
@@ -501,6 +554,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
   /** Object search exploration (existing find behaviour, now narrated and budgeted). */
   async function explore(query) {
     const found = await runExploration("find", query);
+    if (found) _lastOutcome = "found (verified)"; else if (_lastOutcome !== "stopped") _lastOutcome = "not found";
     if (!found && exploring === false && taskGen) {
       // runExploration already printed the summary; make the outcome explicit.
       reply(`Not found: I did not see a ${query}.`);
@@ -510,16 +564,28 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
 
   /** "Find X": remembered objects → remembered descriptions → autonomous exploration. */
   async function findObject(query) {
-    reply("Searching remembered objects…");
-    let outcome = await visitKnownObject(query);
-    if (outcome === "verified" || outcome === "stopped") return;
-    if (outcome === "no_memory") {
-      outcome = await navigateTo(query, { silentMiss: true });
-      if (outcome === "verified" || outcome === "stopped" || outcome === "busy") return;
-      if (outcome === "no_memory") reply(`I have no memory of a ${query} yet. Exploring to look for it.`);
+    recStart(query);
+    try {
+      reply("Searching remembered objects…", { kind: "memory" });
+      let outcome = await visitKnownObject(query);
+      if (outcome === "verified" || outcome === "stopped") return outcome;
+      if (outcome === "no_memory" || outcome === "arrived") {
+        // No object memory, or the remembered object viewpoint did not verify:
+        // try the remembered scene descriptions before exploring.
+        if (outcome === "arrived") reply(`That viewpoint didn't verify. Checking remembered views described as a ${query}…`, { kind: "memory" });
+        outcome = await navigateTo(query, { silentMiss: true });
+        if (outcome === "verified" || outcome === "stopped" || outcome === "busy") return outcome;
+        if (outcome === "no_memory") reply(`I have no memory of a ${query} yet. Exploring to look for it.`, { kind: "memory" });
+      }
+      outcome = (await explore(query)) ? "verified" : "not_found";
+      return outcome;
+    } finally {
+      const st = currentGoal === null && !exploring ? undefined : undefined; // status decided by markers below
+      await recEnd(lastOutcomeLabel());
     }
-    await explore(query);
   }
+  let _lastOutcome = "unknown";
+  const lastOutcomeLabel = () => _lastOutcome;
 
   async function describeHere() {
     const obs = await captureObservation("talk");
@@ -557,8 +623,22 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     reply(r.answer);
   }
 
+  /** "Tell me how you searched for the bathroom." — deterministic, from the recorded episode. */
+  async function summarizeEpisode() {
+    const ep = (await window.__seekr?.episodeReplay?.latest?.()) ?? lastEpisode;
+    if (!ep) return reply("I have no recorded search yet. Ask me to find something first, and I'll record how it went.");
+    reply(window.__seekr.episodeReplay.summarize(ep));
+  }
+  async function startReplay() {
+    const er = window.__seekr?.episodeReplay;
+    if (!er) return reply("Replay is not available.");
+    await er.start();
+  }
+
   function stop() {
+    if (window.__seekr?.episodeReplay?.active) { window.__seekr.episodeReplay.stop(); _lastOutcome = "stopped"; return; }
     if (window.__seekr?.replay?.active) { window.__seekr.replay.stop(); return; }
+    if (episode) _lastOutcome = "stopped";
     const wasMoving = agent.busy?.() || exploring;
     currentGoal = null;
     exploring = false; // cancels the exploration loop at its next check
@@ -573,6 +653,8 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const clean = text.replace(/^\s*(seekr|navevolve agent|navevolve|agent)[,:!]?\s*/i, "").trim();
     let m;
     if (STOP_RE.test(clean)) return { intent: "stop", clean };
+    if (/\b(tell me|explain)\b.*\bhow you (found|searched|looked|got)|why (couldn'?t|could not|didn'?t) you find|how did you (find|search|get)/i.test(clean)) return { intent: "replay_summary", clean };
+    if (/^(give me a replay|replay\b|show me how you got there|play (it )?back|show me the replay)/i.test(clean)) return { intent: "replay_start", clean };
     if (/^(yes|yes please|sure|ok|okay|go ahead|do it|explore)[.!]?$/i.test(clean)) return { intent: "yes", clean };
     if (PLACES_RE.test(clean)) return { intent: "list_places", clean };
     if (EXPLORE_RE.test(clean) || EXPLORE_NOVEL_RE.test(clean)) {
@@ -596,6 +678,8 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const { intent, target, mode, clean } = parse(text);
     say("You", text);
     if (intent === "stop") return stop();
+    if (intent === "replay_summary") return summarizeEpisode();
+    if (intent === "replay_start") return startReplay();
     if (busy) return reply("One moment — I'm still working on the previous request (or say \"stop\").");
     busy = true;
     try {

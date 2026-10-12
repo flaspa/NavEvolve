@@ -1,0 +1,612 @@
+{
+ "episode_id": "ep-20261012024710",
+ "scene_id": "interior_0759_839979",
+ "goal": "vase with the red flowes",
+ "started_at": 1791773230918,
+ "start": {
+  "x": -5.651659137563662,
+  "z": 0.3570219931245564,
+  "headingDeg": 335.0203473109614
+ },
+ "trajectory": [
+  {
+   "t": 252,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 504,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 752,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 1006,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 1253,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 1502,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 1755,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 2001,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 2252,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 2503,
+   "x": -5.652,
+   "z": 0.357,
+   "headingDeg": 335
+  },
+  {
+   "t": 2756,
+   "x": -5.647,
+   "z": 0.36,
+   "headingDeg": 336
+  },
+  {
+   "t": 3002,
+   "x": -5.335,
+   "z": 0.581,
+   "headingDeg": 37
+  },
+  {
+   "t": 3255,
+   "x": -5.029,
+   "z": 0.797,
+   "headingDeg": 54.7
+  },
+  {
+   "t": 3509,
+   "x": -4.723,
+   "z": 1.014,
+   "headingDeg": 54.7
+  },
+  {
+   "t": 3752,
+   "x": -4.417,
+   "z": 1.23,
+   "headingDeg": 54.7
+  },
+  {
+   "t": 4075,
+   "x": -4.082,
+   "z": 1.346,
+   "headingDeg": 83.7
+  },
+  {
+   "t": 4257,
+   "x": -3.82,
+   "z": 1.358,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 4503,
+   "x": -3.445,
+   "z": 1.375,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 4752,
+   "x": -3.064,
+   "z": 1.392,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 5009,
+   "x": -2.689,
+   "z": 1.409,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 5251,
+   "x": -2.321,
+   "z": 1.425,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 5512,
+   "x": -2.04,
+   "z": 1.438,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 5750,
+   "x": -1.665,
+   "z": 1.455,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 6002,
+   "x": -1.29,
+   "z": 1.471,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 6256,
+   "x": -0.909,
+   "z": 1.489,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 6503,
+   "x": -0.534,
+   "z": 1.505,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 6751,
+   "x": -0.166,
+   "z": 1.522,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 7013,
+   "x": 0.103,
+   "z": 1.534,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 7253,
+   "x": 0.484,
+   "z": 1.551,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 7509,
+   "x": 0.853,
+   "z": 1.567,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 7755,
+   "x": 1.234,
+   "z": 1.585,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 8006,
+   "x": 1.609,
+   "z": 1.601,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 8275,
+   "x": 1.915,
+   "z": 1.615,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 8513,
+   "x": 2.264,
+   "z": 1.631,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 8754,
+   "x": 2.633,
+   "z": 1.647,
+   "headingDeg": 87.4
+  },
+  {
+   "t": 9008,
+   "x": 2.989,
+   "z": 1.694,
+   "headingDeg": 79.4
+  },
+  {
+   "t": 9253,
+   "x": 3.271,
+   "z": 1.942,
+   "headingDeg": 48.7
+  },
+  {
+   "t": 9505,
+   "x": 3.553,
+   "z": 2.189,
+   "headingDeg": 48.7
+  },
+  {
+   "t": 9751,
+   "x": 3.774,
+   "z": 2.383,
+   "headingDeg": 48.7
+  },
+  {
+   "t": 10005,
+   "x": 4.016,
+   "z": 2.655,
+   "headingDeg": 35.7
+  },
+  {
+   "t": 10254,
+   "x": 4.111,
+   "z": 3.017,
+   "headingDeg": 14.8
+  },
+  {
+   "t": 10505,
+   "x": 4.207,
+   "z": 3.38,
+   "headingDeg": 14.8
+  },
+  {
+   "t": 10753,
+   "x": 4.303,
+   "z": 3.743,
+   "headingDeg": 14.8
+  },
+  {
+   "t": 11079,
+   "x": 4.476,
+   "z": 4,
+   "headingDeg": 36.4
+  },
+  {
+   "t": 11256,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 80
+  },
+  {
+   "t": 11502,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 139.1
+  },
+  {
+   "t": 11754,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 199.5
+  },
+  {
+   "t": 12005,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 12253,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 12503,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 12753,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 13002,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 13251,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 13504,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 13751,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 14001,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 14251,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 14501,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 14751,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 15001,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 15251,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 15501,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 15751,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 16001,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 16251,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 16501,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 16751,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  },
+  {
+   "t": 17001,
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2
+  }
+ ],
+ "events": [
+  {
+   "kind": "user",
+   "from": "You",
+   "text": "Find the vase with the red flowes.",
+   "speak": false,
+   "t": 0,
+   "traj_index": 0,
+   "pose": {
+    "x": -5.652,
+    "z": 0.357,
+    "headingDeg": 335
+   }
+  },
+  {
+   "kind": "memory",
+   "text": "Searching remembered objects\u2026",
+   "speak": true,
+   "t": 1,
+   "traj_index": 0,
+   "pose": {
+    "x": -5.652,
+    "z": 0.357,
+    "headingDeg": 335
+   }
+  },
+  {
+   "kind": "memory",
+   "text": "I remember a Vase with red foliage in a place I recognize as \"A contemporary luxury showroom or design gallery featuring dramatic black-and-white marble\" (1 sighting, 1 supporting observation, approx. (-0.1, -6.1), image-center-approx). Walking to where I saw it\u2026",
+   "speak": true,
+   "t": 2747,
+   "traj_index": 9,
+   "pose": {
+    "x": -5.652,
+    "z": 0.357,
+    "headingDeg": 335
+   }
+  },
+  {
+   "kind": "arrive",
+   "text": "Arrived at the viewpoint where I saw the Vase with red foliage (12.256 m).",
+   "speak": true,
+   "t": 11084,
+   "traj_index": 43,
+   "pose": {
+    "x": 4.532,
+    "z": 4.066,
+    "headingDeg": 38.4
+   }
+  },
+  {
+   "kind": "say",
+   "text": "Checking for the vase with the red flowes\u2026",
+   "speak": false,
+   "t": 11975,
+   "traj_index": 46,
+   "pose": {
+    "x": 4.532,
+    "z": 4.066,
+    "headingDeg": 204.2
+   }
+  },
+  {
+   "kind": "verify",
+   "text": "Object verified: I can see \"vase with the red flowes\" here. A white vase holding red flowers is clearly visible in the bottom-left foreground.",
+   "speak": true,
+   "visible": true,
+   "reason": "A white vase holding red flowers is clearly visible in the bottom-left foreground.",
+   "obs_id": "6acc4a3a0cfc6454495f166e",
+   "t": 17220,
+   "traj_index": 67,
+   "pose": {
+    "x": 4.532,
+    "z": 4.066,
+    "headingDeg": 204.2
+   }
+  }
+ ],
+ "status": "not found",
+ "ended_at": 1791773248138,
+ "final_pose": {
+  "x": 4.531600419925403,
+  "z": 4.065892693435586,
+  "headingDeg": 204.20392192403597
+ },
+ "waypoints": [
+  {
+   "x": -5.652,
+   "z": 0.357,
+   "traj_index": 0
+  },
+  {
+   "x": -5.029,
+   "z": 0.797,
+   "traj_index": 12
+  },
+  {
+   "x": -4.417,
+   "z": 1.23,
+   "traj_index": 14
+  },
+  {
+   "x": -3.82,
+   "z": 1.358,
+   "traj_index": 16
+  },
+  {
+   "x": -3.064,
+   "z": 1.392,
+   "traj_index": 18
+  },
+  {
+   "x": -2.321,
+   "z": 1.425,
+   "traj_index": 20
+  },
+  {
+   "x": -1.665,
+   "z": 1.455,
+   "traj_index": 22
+  },
+  {
+   "x": -0.909,
+   "z": 1.489,
+   "traj_index": 24
+  },
+  {
+   "x": -0.166,
+   "z": 1.522,
+   "traj_index": 26
+  },
+  {
+   "x": 0.484,
+   "z": 1.551,
+   "traj_index": 28
+  },
+  {
+   "x": 1.234,
+   "z": 1.585,
+   "traj_index": 30
+  },
+  {
+   "x": 1.915,
+   "z": 1.615,
+   "traj_index": 32
+  },
+  {
+   "x": 2.633,
+   "z": 1.647,
+   "traj_index": 34
+  },
+  {
+   "x": 3.271,
+   "z": 1.942,
+   "traj_index": 36
+  },
+  {
+   "x": 3.774,
+   "z": 2.383,
+   "traj_index": 38
+  },
+  {
+   "x": 4.111,
+   "z": 3.017,
+   "traj_index": 40
+  },
+  {
+   "x": 4.303,
+   "z": 3.743,
+   "traj_index": 42
+  },
+  {
+   "x": 4.476,
+   "z": 4,
+   "headingDeg": 36.4,
+   "traj_index": 43
+  },
+  {
+   "x": 4.532,
+   "z": 4.066,
+   "headingDeg": 204.2,
+   "traj_index": 67
+  }
+ ],
+ "assets": {
+  "images": {
+   "6acc4a3a0cfc6454495f166e": "/replay/episodes/ep-20261012024710/6acc4a3a0cfc6454495f166e.jpg"
+  },
+  "audio": {}
+ },
+ "label": "Recorded Replay"
+}

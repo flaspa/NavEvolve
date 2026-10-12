@@ -65,6 +65,7 @@ import perception  # noqa: E402
 import talk  # noqa: E402
 import objects  # noqa: E402
 import harness  # noqa: E402
+import replay_assets  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -168,7 +169,7 @@ def _counts() -> dict:
 @app.get("/observations")
 async def recent_observations(scene_id: str | None = None, limit: int = 20) -> dict:
     try:
-        items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 100))
+        items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 500))
         total = await anyio.to_thread.run_sync(db.count_observations, scene_id)
         counts = await anyio.to_thread.run_sync(_counts)
         scenes = await anyio.to_thread.run_sync(db.scene_counts)
@@ -469,3 +470,16 @@ async def embed_missing_objects(scene_id: str, limit: int = 100) -> dict:
         return await anyio.to_thread.run_sync(objects.embed_missing, scene_id, min(limit, 300))
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"embed-missing failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class EpisodeRequest(BaseModel):
+    episode: dict
+
+
+@app.post("/replay/episodes")
+async def save_replay_episode(req: EpisodeRequest) -> dict:
+    """Persists a browser-recorded navigation episode + cached images/audio for offline replay."""
+    try:
+        return await anyio.to_thread.run_sync(replay_assets.save_episode, req.episode)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"episode save failed: {type(exc).__name__}: {exc}"[:300]) from exc

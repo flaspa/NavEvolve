@@ -1425,3 +1425,38 @@ body {
   font-weight: 700;
   letter-spacing: 0.6px;
 }
+
+.replay-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 4px 6px;
+  border: 1px solid rgba(224, 196, 138, 0.35);
+  border-radius: 6px;
+  background: rgba(224, 196, 138, 0.08);
+}
+
+.replay-bar-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #f0dcae;
+  margin-right: 4px;
+}
+
+.replay-bar button {
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e8ee;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.replay-bar button[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
