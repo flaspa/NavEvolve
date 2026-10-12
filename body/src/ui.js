@@ -14,6 +14,7 @@ import {
   formatCameraPosition,
 } from "./hudPosition.js";
 import { parseNumericEdit } from "./valueEdit.js";
+import { APP_CONFIG } from "./config/appConfig.js";
 
 /**
  * Plain-text transcript of chat lines, oldest first, one blank line between
@@ -66,7 +67,7 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-pos" data-role="pos"></div>
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
       <div class="hud-pos" data-role="captures">Observations: —</div>
-      <a class="hud-link" href="http://localhost:8000/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
+      <a class="hud-link" href="${APP_CONFIG.brainUrl}/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
       <div class="hud-view">
         <button type="button" data-mode="first">1st Person</button>
         <button type="button" data-mode="third">3rd Person</button>

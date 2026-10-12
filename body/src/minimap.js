@@ -373,7 +373,31 @@ export function createMinimap({
     ctx.stroke();
   }
 
+  // --- agent panel ---
+  let markers = [], pathPts = [];
+  function drawAgentOverlay() {
+    if (pathPts.length > 1) {
+      ctx.strokeStyle = "rgba(255, 200, 80, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      pathPts.forEach(([x, z], i) => (i ? ctx.lineTo(toX(x), toY(z)) : ctx.moveTo(toX(x), toY(z))));
+      ctx.stroke();
+    }
+    ctx.font = "10px sans-serif";
+    for (const m of markers) {
+      ctx.fillStyle = "rgba(255, 120, 200, 0.95)";
+      ctx.beginPath();
+      ctx.arc(toX(m.x), toY(m.z), 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fillText(m.label, toX(m.x) + 6, toY(m.z) + 3);
+    }
+  }
+  // --- agent panel ---
+
   return {
+    setMarkers(v) { markers = v; },
+    setPath(v) { pathPts = v; },
     /**
      * Call once per frame.
      * @param {object} s { avatarX, avatarZ, heading, camX, camZ, environment }
@@ -397,6 +421,7 @@ export function createMinimap({
       drawNavmesh();
       drawEnvironment(s.environment);
       drawTrail();
+      drawAgentOverlay();
       if (s.camX !== undefined) drawCamera(s.camX, s.camZ);
       if (s.avatarX !== undefined) drawAvatar(s.avatarX, s.avatarZ, s.heading ?? 0);
     },

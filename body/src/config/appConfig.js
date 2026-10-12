@@ -6,7 +6,7 @@
  */
 export const APP_CONFIG = Object.freeze({
   /** Scene loaded at startup. Must match an id in SCENES. */
-  defaultSceneId: "interior_0637_841444",
+  defaultSceneId: "interior_0759_839979",
 
   /** Camera mode the app opens in — "first" | "third". */
   defaultView: "first",
@@ -26,5 +26,5 @@ export const APP_CONFIG = Object.freeze({
   habitatDataUrl: "/habitat",
 
   /** NavEvolve Brain (brain/server.py): health and MongoDB status over HTTP. */
-  brainUrl: "http://localhost:8000",
+  brainUrl: import.meta.env.VITE_BRAIN_URL ?? "http://localhost:8000",
 });
