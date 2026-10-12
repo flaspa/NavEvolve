@@ -191,7 +191,8 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
         <button type="button" data-role="next" title="Next observation">Next ›</button>
       </div>
       <div class="pi-meta" data-role="meta"></div>
-      <div class="pi-desc" data-role="description"></div>`;
+      <div class="pi-desc" data-role="description"></div>
+      <div class="pi-objects" data-role="objects"></div>`;
     document.body.appendChild(root);
 
     // The panel sits above the world canvas, so its clicks never reach the
@@ -246,6 +247,36 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
       return doc.description_text || "Not yet enriched.";
     }
 
+    async function loadObjects() {
+      const box = el("objects");
+      box.textContent = "";
+      const sceneId = document.querySelector("#hud")?.dataset.sceneId ?? window.__seekr?.scene?.id;
+      if (!sceneId) return;
+      try {
+        const r = await fetch(`${brainUrl}/places/${encodeURIComponent(place.place_id)}/objects?scene_id=${encodeURIComponent(sceneId)}`);
+        if (!r.ok) return;
+        const { items } = await r.json();
+        if (!items.length) { box.textContent = "No object memories in this place yet."; return; }
+        const title = document.createElement("div");
+        title.className = "pi-objects-title";
+        title.textContent = `${items.length} remembered object${items.length === 1 ? "" : "s"} here`;
+        box.append(title);
+        for (const o of items.slice(0, 12)) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "pi-object";
+          const tag = o.location_method === "splat-bbox-raycast" ? "grounded" : o.position ? "approx." : "no position";
+          row.textContent = `${o.display_name ?? o.name} · ${o.sighting_count ?? 1}× · ${tag}`;
+          row.title = o.description ?? "";
+          // Jump to a supporting observation of this object that belongs to this place.
+          const target = (o.obs_ids ?? []).find((id) => place.observation_ids.includes(id));
+          row.disabled = !target;
+          row.addEventListener("click", () => { index = place.observation_ids.indexOf(target); show(); });
+          box.append(row);
+        }
+      } catch (_) { /* backend offline: leave empty */ }
+    }
+
     async function show() {
       const ids = place.observation_ids;
       const id = ids[index];
@@ -291,6 +322,7 @@ export function createCognitiveMap({ mount, footer, brainUrl = "" }) {
       root.hidden = false;
       draw(lastGraph);
       show();
+      loadObjects();
     }
 
     function refresh(nextPlace) {

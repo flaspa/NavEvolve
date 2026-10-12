@@ -27,7 +27,12 @@ Endpoints:
     POST /talk/intent      {text} → structured intent {intent, target} for unfamiliar phrasing
     POST /observations/{id}/detect   Gemini object list (name, description, bbox) for one JPEG
     POST /objects/ingest   positioned sightings → `objects` collection (linked to place graph)
-    GET  /objects          object memories of a scene, optional ?q=
+    GET  /objects          object memories of a scene, optional ?q= (keyword)
+    GET  /objects/search   semantic retrieval ?scene_id=&q=&k= (768-d cosine, in-process)
+    GET  /places/find      places whose description matches ?q=
+    GET  /places/{place_id}/objects   objects observed in a place (active graph)
+    POST /objects/relink   refresh cached place links from the active graph
+    POST /objects/backfill bounded detect+ingest of enriched observations (?limit=)
     POST /talk/choose      Gemini frontier choice {goal, context, options[], observation_ids[]}
     POST /cognitive-map/rebuild  rebuild the scene graph with the ACTIVE policy (no policy change)
     DELETE /observations   local dev only: delete one scene's or all observations
@@ -356,6 +361,10 @@ def _rebuild_graph(scene_id: str, observation_id: str | None) -> dict:
         return {"scene_id": scene_id, "places": 0, "observations": 0, "policy": policy.as_dict()}
     graph = memory.build_graph(observations, policy)
     graph_id = memory.save_graph(graph, policy, scene_id)
+    try:
+        objects.relink(scene_id)
+    except Exception as exc:  # noqa: BLE001  (links are also derived live on read)
+        print(f"[objects] relink skipped: {type(exc).__name__}: {exc}", flush=True)
     out = {"scene_id": scene_id, "graph_id": graph_id, "places": len(graph["places"]),
            "observations": len(observations), "policy": policy.as_dict()}
     if observation_id and observation_id in graph["assignment"]:
@@ -378,3 +387,44 @@ async def rebuild_cognitive_map(req: RebuildRequest) -> dict:
         return await anyio.to_thread.run_sync(_rebuild_graph, req.scene_id, req.observation_id)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
+
+
+@app.get("/objects/search")
+async def semantic_objects(scene_id: str, q: str, k: int = 5) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.semantic_search, scene_id, q, min(k, 20))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"semantic search failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+@app.get("/places/find")
+async def find_places(scene_id: str, q: str) -> dict:
+    try:
+        return {"scene_id": scene_id, "items": await anyio.to_thread.run_sync(objects.find_places, scene_id, q)}
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.get("/places/{place_id}/objects")
+async def place_objects(place_id: str, scene_id: str) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(objects.objects_in_place, scene_id, place_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "place_id": place_id, "total": len(items), "items": items}
+
+
+@app.post("/objects/relink")
+async def relink_objects(scene_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.relink, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.post("/objects/backfill")
+async def backfill_objects(scene_id: str, limit: int = 3) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.backfill, scene_id, min(limit, 10))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"backfill failed: {type(exc).__name__}: {exc}"[:300]) from exc

@@ -15,6 +15,9 @@
 
 const STOP_RE = /^\s*(stop|cancel|halt)\b/i;
 const PLACES_RE = /\b(what|which)\b.*\b(places?|rooms?)\b.*\b(remember|know|seen|visited)|\bremember\b.*\bplaces?\b/i;
+const PLACE_OBJECTS_RE = /\b(what|which)\s+(objects?|things?|items?|furniture)\b.*\b(in|at|inside)\s+(the\s+)?(.+?)[?.!\s]*$/i;
+const PLACES_WITH_RE = /\b(which|what)\s+(places?|rooms?|areas?)\b.*\b(contain|have|has|with)\s+(.+?)[?.!\s]*$/i;
+const WHERE_RE = /\b(where|show me where)\b.*\b(see|seen|saw|is|was|find)\b.*?\b(the|a|an)?\s*([a-z][a-z0-9 -]+?)[?.!\s]*$/i;
 const SEEN_RE = /\b(have you|did you|do you)\s+(ever\s+)?(see|seen|remember|know|notice)\s+(a|an|the|any)?\s*(.+?)[?.!\s]*$/i;
 // Navigation: a leading movement verb, then filler words are stripped until
 // the object phrase ("go stand next to the big table" → "big table").
@@ -152,9 +155,33 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     reply(`I remember ${places.length} places in this scene:\n${lines.join("\n")}`);
   }
 
+  let pendingOffer = null;
+
+  /** Semantic object memory (768-d cosine over object embeddings) with place links. */
+  async function objectMemories(query, k = 5) {
+    const scene = getScene();
+    try {
+      const r = await getJson(`/objects/search?scene_id=${encodeURIComponent(scene.id)}&q=${encodeURIComponent(query)}&k=${k}`);
+      return r.items;
+    } catch (err) {
+      console.warn("[talk] semantic search unavailable:", err.message);
+      return [];
+    }
+  }
+  const placePhrase = (o) => (o.place_id ? ` in ${o.place_label ? `a place I recognize as "${o.place_label}"` : `place ${o.place_id}`}` : " in a place not yet in my map");
+  const evidencePhrase = (o) => `${o.sighting_count ?? 1} sighting${(o.sighting_count ?? 1) === 1 ? "" : "s"}, ${o.obs_ids.length} supporting observation${o.obs_ids.length === 1 ? "" : "s"}`;
+
   async function haveSeen(query) {
+    const objs = await objectMemories(query, 3);
+    if (objs.length) {
+      const o = objs[0];
+      const pos = o.position ? ` Approximate position (${o.position[0].toFixed(1)}, ${o.position[2].toFixed(1)})${o.location_method === "splat-bbox-raycast" ? ", grounded on the splat surface" : ", approximate"}.` : "";
+      reply(`I remember a ${o.display_name ?? o.name}${o.description ? ` (${o.description})` : ""}${placePhrase(o)}, with ${evidencePhrase(o)} (similarity ${o.score.toFixed(2)}).${pos}` +
+        (objs.length > 1 ? ` I also remember ${objs.length - 1} other possible match${objs.length === 2 ? "" : "es"}: ${objs.slice(1).map((x) => x.display_name ?? x.name).join(", ")}. I can navigate to the first and verify.` : " I can navigate there and verify."));
+      return;
+    }
     const { hits, loose, head } = searchLoose(await memories(), query);
-    if (!hits.length) return reply(`I have no memory of "${query}" in this scene.`);
+    if (!hits.length) { pendingOffer = query; return reply(`I don't have a memory of a ${query} yet. Would you like me to explore? (say "yes")`); }
     const best = hits[0].o;
     const label = loose ? `"${head}" (closest match for "${query}")` : `"${query}"`;
     reply(`Yes — I saw ${label} at ${when(best)} near ${where(best)}: ${summary(best)}` +
@@ -241,16 +268,43 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     return q.length > 0 && q.every((t) => n.includes(t)) || (q.length > 1 && n.includes(q.at(-1)));
   };
 
+  /** "What objects do you remember in the dining room?" */
+  async function placeObjects(placeQuery) {
+    const scene = getScene();
+    const places = (await getJson(`/places/find?scene_id=${encodeURIComponent(scene.id)}&q=${encodeURIComponent(placeQuery)}`)).items;
+    if (!places.length) return reply(`None of my remembered places is described as "${placeQuery}".`);
+    for (const p of places.slice(0, 2)) {
+      const objs = (await getJson(`/places/${encodeURIComponent(p.place_id)}/objects?scene_id=${encodeURIComponent(scene.id)}`)).items;
+      reply(objs.length
+        ? `In ${p.place_id} ("${p.label}", ${p.observations} observations) I remember ${objs.length} objects: ${objs.slice(0, 10).map((o) => `${o.display_name ?? o.name} (${o.sighting_count ?? 1}×)`).join(", ")}${objs.length > 10 ? ", …" : ""}.`
+        : `${p.place_id} ("${p.label}") matches, but I have no object memories there yet.`);
+    }
+  }
+
+  /** "Which places contain wooden furniture?" */
+  async function placesWith(query) {
+    const objs = await objectMemories(query, 12);
+    if (!objs.length) return reply(`I have no object memories matching "${query}".`);
+    const byPlace = new Map();
+    for (const o of objs) {
+      const key = o.place_id ?? "unplaced";
+      if (!byPlace.has(key)) byPlace.set(key, { label: o.place_label, items: [] });
+      byPlace.get(key).items.push(o.display_name ?? o.name);
+    }
+    reply([...byPlace.entries()].map(([pid, v]) => `${pid === "unplaced" ? "Not yet placed" : `${pid}${v.label ? ` ("${v.label}")` : ""}`}: ${v.items.join(", ")}`).join("\n"));
+  }
+
   /** Known object memory → walk to its supporting viewpoint, face it, verify. */
   async function visitKnownObject(query) {
     const scene = getScene();
-    const data = await getJson(`/objects?scene_id=${encodeURIComponent(scene.id)}&q=${encodeURIComponent(query)}`);
+    const sem = await objectMemories(query, 3);
+    const data = sem.length ? { items: sem } : await getJson(`/objects?scene_id=${encodeURIComponent(scene.id)}&q=${encodeURIComponent(query)}`);
     const known = data.items.find((o) => o.last_obs_id || (o.obs_ids ?? []).length);
     if (!known) return "no_memory";
     const obsId = known.last_obs_id ?? known.obs_ids.at(-1);
     const obs = await getJson(`/observations/${encodeURIComponent(obsId)}`);
     if (!agent.debug.onNavmesh(obs.pose.x, obs.pose.z)) return "no_memory";
-    reply(`I remember a ${known.display_name ?? known.name} (${known.sightings} sighting${known.sightings === 1 ? "" : "s"}` +
+    reply(`I remember a ${known.display_name ?? known.name}${placePhrase(known)} (${evidencePhrase(known)}` +
       `${known.position ? `, approx. (${known.position[0].toFixed(1)}, ${known.position[2].toFixed(1)}), ${known.location_method}` : ""}). Walking to where I saw it…`);
     currentGoal = query;
     const result = await agent.goto({ x: obs.pose.x, z: obs.pose.z, stopWithin: 0.35 });
@@ -326,6 +380,11 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
             body: JSON.stringify({ scene_id: scene.id, observation_id: fwd.obsId }),
           });
           guard(gen);
+          if (gemini()) { // object memory, not awaited: never blocks movement; status lives on the observation
+            detectAndRemember(fwd.obsId, { cameraSnapshot: fwd.cameraSnapshot, rangeM: fwd.rangeM })
+              .then((sg) => sg.length && narrate(`Remembered ${sg.length} objects here: ${sg.slice(0, 6).map((x) => x.name).join(", ")}.`, fwd))
+              .catch((err) => console.warn("[explore] object memory:", err.message));
+          }
           const pl = g.placement;
           if (pl?.recognized) { stats.recognized += 1; reply(`This observation resembles a place I remember (${pl.place_id}, ${pl.members} observations, similarity ${pl.best_score?.toFixed(2)}).`); }
           else if (pl) { stats.newPlaces += 1; reply(`I don't recognize this viewpoint${pl.best_score != null ? ` (best match ${pl.best_score.toFixed(2)})` : ""}. Recording a new place (${pl.place_id}). The map now has ${g.places} places.`); }
@@ -491,6 +550,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     const clean = text.replace(/^\s*(seekr|navevolve agent|navevolve|agent)[,:!]?\s*/i, "").trim();
     let m;
     if (STOP_RE.test(clean)) return { intent: "stop", clean };
+    if (/^(yes|yes please|sure|ok|okay|go ahead|do it|explore)[.!]?$/i.test(clean)) return { intent: "yes", clean };
     if (PLACES_RE.test(clean)) return { intent: "list_places", clean };
     if (EXPLORE_RE.test(clean) || EXPLORE_NOVEL_RE.test(clean)) {
       return { intent: "explore", mode: EXPLORE_LARGE_RE.test(clean) ? "large" : "local", clean };
@@ -501,7 +561,10 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       return { intent: find ? "find" : "navigate", target, clean };
     }
     if (HERE_RE.test(clean)) return { intent: "describe_here", clean };
+    if ((m = PLACE_OBJECTS_RE.exec(clean))) return { intent: "place_objects", target: m[5], clean };
+    if ((m = PLACES_WITH_RE.exec(clean))) return { intent: "places_with", target: m[4], clean };
     if ((m = SEEN_RE.exec(clean))) return { intent: "have_seen", target: m[5], clean };
+    if ((m = WHERE_RE.exec(clean))) return { intent: "have_seen", target: m[4], clean };
     return { intent: "unknown", clean };
   }
 
@@ -517,6 +580,9 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       else if (intent === "find") await findObject(target);
       else if (intent === "navigate") await navigateTo(target);
       else if (intent === "have_seen") await haveSeen(target);
+      else if (intent === "place_objects") await placeObjects(target);
+      else if (intent === "places_with") await placesWith(target);
+      else if (intent === "yes" && pendingOffer) { const t = pendingOffer; pendingOffer = null; await findObject(t); }
       else if (intent === "describe_here") await describeHere();
       else {
         try {
