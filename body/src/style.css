@@ -1358,10 +1358,6 @@ body {
   cursor: pointer;
 }
 
-/* --- agent panel --- */
-.agent-obj { display: flex; justify-content: space-between; gap: 6px; padding: 1px 0; }
-.agent-obj span:last-child { color: rgba(255,255,255,0.5); }
-#cognitive-map .cognitive-map-body.has-objs { display: block; overflow-y: auto; padding: 18px 8px 4px; align-items: stretch; color: #eee; }
 .pi-objects {
   display: flex;
   flex-direction: column;

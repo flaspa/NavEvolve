@@ -43,7 +43,6 @@ Endpoints:
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import os
 from datetime import datetime
@@ -64,7 +63,6 @@ import db  # noqa: E402  (needs the environment loaded first)
 import memory  # noqa: E402
 import perception  # noqa: E402
 import talk  # noqa: E402
-import agent_memory  # noqa: E402  (the agent's object memory; memory = the place map)
 import objects  # noqa: E402
 import harness  # noqa: E402
 import replay_assets  # noqa: E402
@@ -81,16 +79,11 @@ ALLOWED_ORIGINS = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(_agent_loop()) if "_agent_loop" in globals() else None
     yield
-    task and task.cancel()
     db.close()
 
 
 app = FastAPI(title="NavEvolve Brain", lifespan=lifespan)
-import agent_ws  # noqa: E402
-
-app.include_router(agent_ws.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -161,7 +154,6 @@ async def create_observation(obs: Observation) -> dict:
         counts = await anyio.to_thread.run_sync(_counts)
     except Exception as exc:  # noqa: BLE001
         raise _db_error(exc) from exc
-    await agent_memory.enqueue(obs_id)  # background ingest (embeddings, objects)
     return {"ok": True, "id": obs_id, "image_bytes": len(jpeg), **counts}
 
 
@@ -318,39 +310,6 @@ async def talk_intent(req: IntentRequest) -> dict:
         raise HTTPException(status_code=502, detail=f"intent failed: {type(exc).__name__}: {exc}"[:300]) from exc
 
 
-# --- agent ---
-try:
-    import agent, agent_ws, asyncio
-
-    def _report(t, body):
-        if t.cancelled():
-            print("[agent] cancelled (new goal / stop)", flush=True)
-        if t.cancelled() or not t.exception():
-            return
-        print("[agent] crashed:", repr(t.exception()), flush=True)
-        async def tell():
-            try:
-                await body.thought("error", f"I stopped: {t.exception()}")
-            except Exception:  # browser gone too
-                pass
-        asyncio.create_task(tell())
-
-    async def _agent_loop():
-        task = None
-        while True:
-            ev = await agent_ws.next_event()
-            print("[agent] loop got", ev, flush=True)
-            if ev.get("event") == "goal":
-                task and task.cancel()
-                body = await agent_ws.get_body()
-                task = asyncio.create_task(agent.find(body, ev.get("sceneId") or agent_ws.scene_id or "interior_0759_839979", ev["text"]))
-                task.add_done_callback(lambda t, b=body: _report(t, b))
-            elif ev.get("event") == "stop" and task:
-                task.cancel()
-
-except ImportError:  # stream B not merged yet
-    pass
-# --- agent ---
 @app.post("/observations/{obs_id}/detect")
 async def detect_objects(obs_id: str) -> dict:
     try:

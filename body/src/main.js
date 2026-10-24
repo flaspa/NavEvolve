@@ -39,7 +39,6 @@ import {
 import { loadAvatar } from "./avatar.js";
 import { createPlayer } from "./player.js";
 import { createUI } from "./ui.js";
-import { createAgentPanel } from "./agentPanel.js"; // --- agent panel ---
 import { APP_CONFIG } from "./config/appConfig.js";
 import { SCENES, getSceneById } from "./config/scenes.js";
 import { CAMERA_DISTANCE } from "./cameraDistance.js";
@@ -153,11 +152,6 @@ const minimap = createMinimap({
   mount: ui.minimapMount,
   extent: CONFIG.minimap.extent,
 });
-
-// --- agent panel ---
-window.__seekr = window.__seekr || {};
-window.__seekr.agentPanel = createAgentPanel({ ui, minimap });
-// --- agent panel ---
 
 // ---------------------------------------------------------------------------
 // Brain status — brain/server.py liveness and its MongoDB Atlas ping. The
@@ -1458,10 +1452,6 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
-// --- agent hook --- (the controller is created above, shared with Talk to Seekr)
-window.__seekr = Object.assign(window.__seekr || {}, { agent }); // brain WebSocket commands land here
-// --- agent hook ---
-
 // ---------------------------------------------------------------------------
 // Animation loop
 // ---------------------------------------------------------------------------
@@ -1498,7 +1488,8 @@ startLoop(renderer, scene, camera, (delta) => {
 // ---------------------------------------------------------------------------
 // Debug handle — the surfaces later integrations will use.
 // ---------------------------------------------------------------------------
-Object.defineProperties(window.__seekr, Object.getOwnPropertyDescriptors({ // (descriptors: keep the live getters)
+window.__seekr = {
+  ...window.__seekr,
   get scene() {
     return activeScene;
   },
@@ -1520,8 +1511,4 @@ Object.defineProperties(window.__seekr, Object.getOwnPropertyDescriptors({ // (d
   get player() {
     return player;
   },
-}));
-
-// --- agent link ---
-import("./agentLink.js").then((m) => m.startAgentLink());
-// --- agent link ---
+};
