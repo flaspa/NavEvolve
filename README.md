@@ -14,6 +14,7 @@ reused and what is new.
 |---|---|---|
 | **Body** (`body/`) | 3D world (Three.js + Spark splats), human avatar, NavMesh-constrained WASD locomotion, minimap, egocentric frame capture (`frameCapture.js`) | ✅ working (reused) |
 | **Perception** (`brain/perception.py`) | ego JPEG + pose + camera + Gaussian-splat centre range → MongoDB `observations`; Gemini 3.8 Flash structured description + separate 768-d image and text embeddings (Gemini Embedding 2) on the same document | capture ✅ · enrichment ✅ (1 observation so far) |
+| **Object memory** (`brain/objects.py`) | `objects` collection: detected objects with approximate 3D positions grounded on the splat, sightings, supporting observations and the cognitive place they belong to | ✅ |
 | **Memory** (`brain/memory.py`) | cognitive map: observations replayed chronologically, matched to place memories by a weighted visual/semantic/range policy, places + traversal edges persisted in `cognitive_graphs` | ✅ |
 | **Harness** (`brain/harness.py`) | replays observations, measures missed revisits / false merges against pose-derived reference pairs (selection vs frozen held-out split), searches candidate policies, adopts only on improvement, persists `harness_policies` / `harness_runs`, rebuilds the graph | ✅ |
 
@@ -46,6 +47,10 @@ cp .env.example .env    # set MONGODB_URI and MONGODB_DB
 | `POST /talk/verify` | `{observation_id, goal}` → Gemini: is the goal visible in that stored JPEG? |
 | `POST /talk` | `{question, memories[]}` → Gemini answer grounded only in those memories |
 | `POST /observations/{id}/enrich` | run the Gemini description pipeline on one observation |
+| `POST /observations/{id}/detect` | Gemini object list (name, description, normalised bbox) for one stored JPEG |
+| `POST /objects/ingest` / `GET /objects?scene_id=&q=` | object-level memory (`objects` collection), linked to place nodes and source observations |
+| `POST /talk/choose` | Gemini picks a frontier from recent frames (Jun's CHOOSE prompt) |
+| `POST /cognitive-map/rebuild` | rebuild a scene's graph with the active policy; reports how one observation was placed |
 | `GET /cognitive-map` | latest cognitive graph (no vectors) + policy + harness status, drawn in the Cognitive Map panel; click a node to inspect that place's photos and descriptions |
 | `POST /sessions` | start a new capture session (observations kept) |
 | `DELETE /observations?expected=N[&scene_id=…]` | **local dev only** (loopback client + localhost Host; disable with `ALLOW_DEV_DELETE=0`): delete observations of one scene or all; `expected` must match the confirmed count |
@@ -100,10 +105,22 @@ Type in the **Talk** tab (or press Enter). The agent answers as "NavEvolve Agent
 |---|---|
 | `Seekr, what places do you remember?` | lists the cognitive map's places with their descriptions |
 | `Have you seen a dining table?` | searches stored Gemini descriptions; reports when/where, or "no memory" |
-| `Take me to the place where you saw the dining table.` / `Go stand next to the big table` / `Find the dining table` / `Go to the table` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
+| `Explore this area` / `Explore a large area` / `Explore and tell me what you discover` | autonomous, narrated exploration: looks around, enriches the view, says whether it recognizes the place, picks a frontier with Gemini and explains why, walks, repeats within a bounded budget (local 3 steps / large 8), then summarizes real counts and coverage |
+| `Find the teapot` / `Find the dining table` | searches object memory, then remembered descriptions; walks there and verifies with Gemini; if nothing is known or verification fails, **explores unseen frontiers autonomously** (bounded: 6 steps / 4 min), detecting and remembering objects as it goes; reports "Object verified" or "Not found" |
+| `Take me to the place where you saw the dining table.` / `Go stand next to the big table` / `Go to the table` | walks (A* over the NavMesh) to the real observation pose, faces the remembered view, captures and asks Gemini to verify |
 | `What do you see here?` | captures a view and reads back Gemini's description |
 | `Stop.` | halts the walk immediately; WASD is restored |
 | anything else | Gemini classifies the intent (`POST /talk/intent`); if it is none of the above, Gemini answers grounded only in matching memories |
+
+## Replay Demo (presentation)
+
+Click **▶ Replay Demo** in the HUD, or in the Talk tab type `Tell me how you searched for the bathroom.` (grounded explanation from the saved data) and then `Give me a replay.` / `Replay that` / `Show me the replay` — the same guided replay; `Stop replay` stops it. It is a labelled guided replay of a real
+saved route: "Find the bathroom." → cached ElevenLabs narration → the avatar
+walks on the NavMesh to the remembered bathroom viewpoint → the saved
+observation and its recorded Gemini verification are shown. **■ Stop Replay**
+(or WASD / typing "stop") halts it; the button then reads **↻ Replay Again**.
+Assets are built once with `cd brain && .venv/Scripts/python scripts/build_replay.py`
+(needs `ELEVENLABS_API_KEY` in `brain/.env`); playback needs no backend.
 
 ## Controls
 

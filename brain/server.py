@@ -25,6 +25,19 @@ Endpoints:
     POST /talk/verify      {observation_id, goal} → is the goal visible in that JPEG?
     POST /talk             {question, memories[]} → Gemini answer grounded in those memories
     POST /talk/intent      {text} → structured intent {intent, target} for unfamiliar phrasing
+    POST /observations/{id}/detect   Gemini object list (name, description, bbox) for one JPEG
+    POST /objects/ingest   positioned sightings → `objects` collection (linked to place graph)
+    GET  /objects          object memories of a scene, optional ?q= (keyword)
+    GET  /objects/search   semantic retrieval ?scene_id=&q=&k= (768-d cosine, in-process)
+    GET  /places/find      places whose description matches ?q=
+    GET  /places/{place_id}/objects   objects observed in a place (active graph)
+    POST /objects/relink   refresh cached place links from the active graph
+    POST /objects/backfill bounded detect+ingest of enriched observations (?limit=)
+    POST /objects/refuse   recompute fused positions from stored sightings
+    POST /objects/embed-missing  bounded 768-d embeddings for pre-P2 object memories
+    GET  /objects/markers  minimap markers: id, name, position, method, uncertainty, place
+    POST /talk/choose      Gemini frontier choice {goal, context, options[], observation_ids[]}
+    POST /cognitive-map/rebuild  rebuild the scene graph with the ACTIVE policy (no policy change)
     DELETE /observations   local dev only: delete one scene's or all observations
 """
 
@@ -52,6 +65,9 @@ import memory  # noqa: E402
 import perception  # noqa: E402
 import talk  # noqa: E402
 import agent_memory  # noqa: E402  (the agent's object memory; memory = the place map)
+import objects  # noqa: E402
+import harness  # noqa: E402
+import replay_assets  # noqa: E402
 
 ALLOWED_ORIGINS = [
     origin.strip()
@@ -161,7 +177,7 @@ def _counts() -> dict:
 @app.get("/observations")
 async def recent_observations(scene_id: str | None = None, limit: int = 20) -> dict:
     try:
-        items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 100))
+        items = await anyio.to_thread.run_sync(db.list_observations, scene_id, min(limit, 500))
         total = await anyio.to_thread.run_sync(db.count_observations, scene_id)
         counts = await anyio.to_thread.run_sync(_counts)
         scenes = await anyio.to_thread.run_sync(db.scene_counts)
@@ -335,3 +351,176 @@ try:
 except ImportError:  # stream B not merged yet
     pass
 # --- agent ---
+@app.post("/observations/{obs_id}/detect")
+async def detect_objects(obs_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.detect, obs_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"detect failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class IngestRequest(BaseModel):
+    scene_id: str
+    observation_id: str
+    sightings: list[dict] = Field(default_factory=list)
+
+
+@app.post("/objects/ingest")
+async def ingest_objects(req: IngestRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.ingest, req.scene_id, req.observation_id, req.sightings)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.get("/objects")
+async def list_objects(scene_id: str, q: str | None = None, limit: int = 20) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(objects.search, scene_id, q, min(limit, 100))
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "total": len(items), "items": items}
+
+
+class ChooseRequest(BaseModel):
+    goal: str = Field(min_length=1, max_length=200)
+    context: str = ""
+    options: list[str] = Field(min_length=1)
+    observation_ids: list[str] = Field(default_factory=list)
+
+
+@app.post("/talk/choose")
+async def talk_choose(req: ChooseRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(talk.choose, req.goal, req.context, req.options, req.observation_ids)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"choose failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+def _rebuild_graph(scene_id: str, observation_id: str | None) -> dict:
+    """Builds and persists a new graph document with the active policy; history is kept.
+    Reports how `observation_id` was placed (recognised vs. new place)."""
+    policy = harness.active_policy()
+    observations = memory.load_observations(scene_id)
+    if not observations:
+        return {"scene_id": scene_id, "places": 0, "observations": 0, "policy": policy.as_dict()}
+    graph = memory.build_graph(observations, policy)
+    graph_id = memory.save_graph(graph, policy, scene_id)
+    try:
+        objects.relink(scene_id)
+    except Exception as exc:  # noqa: BLE001  (links are also derived live on read)
+        print(f"[objects] relink skipped: {type(exc).__name__}: {exc}", flush=True)
+    out = {"scene_id": scene_id, "graph_id": graph_id, "places": len(graph["places"]),
+           "observations": len(observations), "policy": policy.as_dict()}
+    if observation_id and observation_id in graph["assignment"]:
+        idx = graph["assignment"][observation_id]
+        members = graph["places"][idx]["members"]
+        decision = next((d for d in graph["decisions"] if d["observation_id"] == observation_id), {})
+        out["placement"] = {"place_id": f"p{idx}", "members": len(members),
+                            "recognized": len(members) > 1, "best_score": decision.get("best_score")}
+    return out
+
+
+class RebuildRequest(BaseModel):
+    scene_id: str
+    observation_id: str | None = None
+
+
+@app.post("/cognitive-map/rebuild")
+async def rebuild_cognitive_map(req: RebuildRequest) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(_rebuild_graph, req.scene_id, req.observation_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.get("/objects/search")
+async def semantic_objects(scene_id: str, q: str, k: int = 5) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.semantic_search, scene_id, q, min(k, 20))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"semantic search failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+@app.get("/places/find")
+async def find_places(scene_id: str, q: str) -> dict:
+    try:
+        return {"scene_id": scene_id, "items": await anyio.to_thread.run_sync(objects.find_places, scene_id, q)}
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.get("/places/{place_id}/objects")
+async def place_objects(place_id: str, scene_id: str) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(objects.objects_in_place, scene_id, place_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "place_id": place_id, "total": len(items), "items": items}
+
+
+@app.post("/objects/relink")
+async def relink_objects(scene_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.relink, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+@app.post("/objects/backfill")
+async def backfill_objects(scene_id: str, limit: int = 3) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.backfill, scene_id, min(limit, 10))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"backfill failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+@app.post("/objects/refuse")
+async def refuse_objects(scene_id: str) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.refuse, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+
+
+def _markers(scene_id: str) -> list[dict]:
+    out = []
+    for o in objects.search(scene_id, None, limit=300):
+        if not o.get("position"):
+            continue  # unknown positions are never drawn as pins
+        out.append({"id": o["id"], "name": o.get("display_name") or o["name"], "position": o["position"],
+                    "method": o.get("location_method"), "uncertainty_m": o.get("position_uncertainty_m"),
+                    "confidence": o.get("spatial_confidence", o.get("position_confidence")),
+                    "sightings": o.get("sighting_count") or 1, "place_id": o.get("place_id"), "place_label": o.get("place_label"),
+                    "obs_ids": o.get("obs_ids", []), "description": o.get("description", "")})
+    return out
+
+
+@app.get("/objects/markers")
+async def object_markers(scene_id: str) -> dict:
+    try:
+        items = await anyio.to_thread.run_sync(_markers, scene_id)
+    except Exception as exc:  # noqa: BLE001
+        raise _db_error(exc) from exc
+    return {"scene_id": scene_id, "total": len(items), "items": items}
+
+
+@app.post("/objects/embed-missing")
+async def embed_missing_objects(scene_id: str, limit: int = 100) -> dict:
+    try:
+        return await anyio.to_thread.run_sync(objects.embed_missing, scene_id, min(limit, 300))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"embed-missing failed: {type(exc).__name__}: {exc}"[:300]) from exc
+
+
+class EpisodeRequest(BaseModel):
+    episode: dict
+
+
+@app.post("/replay/episodes")
+async def save_replay_episode(req: EpisodeRequest) -> dict:
+    """Persists a browser-recorded navigation episode + cached images/audio for offline replay."""
+    try:
+        return await anyio.to_thread.run_sync(replay_assets.save_episode, req.episode)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"episode save failed: {type(exc).__name__}: {exc}"[:300]) from exc

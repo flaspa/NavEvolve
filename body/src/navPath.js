@@ -1,3 +1,5 @@
+// REUSED from teammate Jun Jiang's NavEvolve branch origin/explore-local (commit 4f50823), verbatim.
+
 /**
  * navPath.js — walkable grid over the NavMesh + A* on it.
  * Cells are walkable iff a top-down probe hits the NavMesh (single-floor scenes).

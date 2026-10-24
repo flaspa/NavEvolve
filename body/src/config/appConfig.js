@@ -26,5 +26,6 @@ export const APP_CONFIG = Object.freeze({
   habitatDataUrl: "/habitat",
 
   /** NavEvolve Brain (brain/server.py): health and MongoDB status over HTTP. */
-  brainUrl: import.meta.env.VITE_BRAIN_URL ?? "http://localhost:8000",
+  // `?brain=http://host:port` overrides this (used to test against a temporary backend).
+  brainUrl: new URLSearchParams(globalThis.location?.search ?? "").get("brain") ?? import.meta.env.VITE_BRAIN_URL ?? "http://localhost:8000",
 });

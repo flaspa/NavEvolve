@@ -375,6 +375,34 @@ export function createMinimap({
 
   // --- agent panel ---
   let markers = [], pathPts = [];
+  let selectedMarkerId = null, highlightedPlaceId = null, hoverMarkerId = null;
+  let markerSelectHandler = null;
+  const pxPerMetre = () => Math.abs(toX(1) - toX(0));
+  /** Nearest marker within 9 px of a client point, or null. */
+  function markerAt(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+    const px = (clientX - rect.left) * sx, py = (clientY - rect.top) * sy;
+    let best = null, bd = 9 * sx;
+    for (const m of markers) {
+      const d = Math.hypot(toX(m.x) - px, toY(m.z) - py);
+      if (d < bd) { bd = d; best = m; }
+    }
+    return best;
+  }
+  canvas.addEventListener("click", (e) => {
+    const m = markerAt(e.clientX, e.clientY);
+    if (!m) return;
+    e.stopPropagation();
+    selectedMarkerId = m.id;
+    markerSelectHandler?.(m);
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    const m = markerAt(e.clientX, e.clientY);
+    hoverMarkerId = m?.id ?? null;
+    canvas.style.cursor = m ? "pointer" : "";
+    canvas.title = m ? `${m.label} · ${m.kind === "grounded" ? "grounded" : "approximate"}${m.uncertainty ? ` ±${m.uncertainty} m` : ""} · ${m.sightings ?? 1}×` : "";
+  });
   function drawAgentOverlay() {
     if (pathPts.length > 1) {
       ctx.strokeStyle = "rgba(255, 200, 80, 0.9)";
@@ -383,14 +411,53 @@ export function createMinimap({
       pathPts.forEach(([x, z], i) => (i ? ctx.lineTo(toX(x), toY(z)) : ctx.moveTo(toX(x), toY(z))));
       ctx.stroke();
     }
-    ctx.font = "10px sans-serif";
-    for (const m of markers) {
-      ctx.fillStyle = "rgba(255, 120, 200, 0.95)";
+    // Destination of the current path.
+    if (pathPts.length > 1) {
+      const [dx, dz] = pathPts[pathPts.length - 1];
+      ctx.strokeStyle = "rgba(255, 200, 80, 0.95)";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(toX(m.x), toY(m.z), 3.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.fillText(m.label, toX(m.x) + 6, toY(m.z) + 3);
+      ctx.arc(toX(dx), toY(dz), 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // Remembered objects: grounded = filled, approximate = hollow + dashed uncertainty ring.
+    // Unknown positions are never passed in, so they are never drawn as pins.
+    ctx.font = "10px sans-serif";
+    const ppm = pxPerMetre();
+    for (const m of markers) {
+      const x = toX(m.x), y = toY(m.z);
+      const active = m.id === selectedMarkerId || m.id === hoverMarkerId || (highlightedPlaceId && m.place_id === highlightedPlaceId);
+      if (m.kind === "grounded") {
+        ctx.fillStyle = active ? "rgba(255, 220, 120, 1)" : "rgba(224, 196, 138, 0.9)";
+        ctx.beginPath();
+        ctx.arc(x, y, active ? 5 : 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = active ? "rgba(255, 170, 220, 1)" : "rgba(255, 120, 200, 0.8)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, active ? 5 : 3.5, 0, Math.PI * 2);
+        ctx.stroke();
+        if (m.uncertainty) {
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = "rgba(255, 120, 200, 0.35)";
+          ctx.beginPath();
+          ctx.arc(x, y, Math.max(6, m.uncertainty * ppm), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      }
+      if (m.id === selectedMarkerId) {
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (active) { // labels only on hover/selection/place highlight, so dense maps stay readable
+        ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+        ctx.fillText(m.label, x + 8, y + 3);
+      }
     }
   }
   // --- agent panel ---
@@ -398,6 +465,11 @@ export function createMinimap({
   return {
     setMarkers(v) { markers = v; },
     setPath(v) { pathPts = v; },
+    setSelectedMarker(id) { selectedMarkerId = id ?? null; },
+    setHighlightedPlace(id) { highlightedPlaceId = id ?? null; },
+    onMarkerSelect(fn) { markerSelectHandler = fn; },
+    markerAt,
+    get markers() { return markers; },
     /**
      * Call once per frame.
      * @param {object} s { avatarX, avatarZ, heading, camX, camZ, environment }

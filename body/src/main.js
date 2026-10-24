@@ -66,10 +66,12 @@ import {
 import { loadSceneProfile } from "./sceneProfile.js";
 import { startLoop } from "./loop.js";
 import { captureEgoFrame } from "./frameCapture.js";
-import { measureCenterRange } from "./egoRange.js";
+import { measureCenterRange, measureBboxRange, approximateBboxPoint } from "./egoRange.js";
 import { createCognitiveMap } from "./cognitiveMap.js";
 import { createAgentControl } from "./agentControl.js";
 import { createTalk } from "./talk.js";
+import { createReplay } from "./replay.js";
+import { createEpisodeReplay } from "./episodeReplay.js";
 import { agentSliderBounds, withAxis } from "./agentPoseAuthoring.js";
 
 console.log("[NavEvolve] Body");
@@ -204,7 +206,29 @@ const cognitiveMap = createCognitiveMap({
   mount: ui.cognitiveMapPanel,
   footer: ui.cognitiveMapFooter,
   brainUrl: APP_CONFIG.brainUrl,
+  onSelectPlace: (placeId) => minimap.setHighlightedPlace(placeId),
+  onSelectObject: (objectId) => minimap.setSelectedMarker(objectId),
+  navigateTo: (name) => talk?.handle(`Take me to the ${name}`),
 });
+minimap.onMarkerSelect((m) => cognitiveMap.openObject(m));
+
+// Remembered objects on the minimap (P3). Only objects with a position are
+// drawn; grounded (splat raycast) and approximate (bearing + range) differ.
+let objectMarkers = [];
+async function pollObjectMarkers() {
+  if (!activeScene) return;
+  try {
+    const res = await fetchJson(`/objects/markers?scene_id=${encodeURIComponent(activeScene.id)}`);
+    if (!res.ok) return;
+    objectMarkers = res.body.items.map((o) => ({
+      id: o.id, name: o.name, label: o.name, x: o.position[0], y: o.position[1], z: o.position[2],
+      position: o.position, kind: o.method?.startsWith("splat") ? "grounded" : "approx", method: o.method,
+      uncertainty: o.uncertainty_m, confidence: o.confidence, sightings: o.sightings, place_id: o.place_id,
+      place_label: o.place_label, obs_ids: o.obs_ids, description: o.description,
+    }));
+    minimap.setMarkers(objectMarkers);
+  } catch (_) { /* brain offline: keep last markers */ }
+}
 
 async function pollCognitiveMap() {
   // Always scene-filtered: before the scene is active there is nothing to
@@ -213,6 +237,7 @@ async function pollCognitiveMap() {
   try {
     const res = await fetchJson(`/cognitive-map?scene_id=${encodeURIComponent(activeScene.id)}`);
     if (res.ok) cognitiveMap.update(res.body);
+    pollObjectMarkers();
   } catch (_) {
     // Brain offline: keep the last drawing.
   }
@@ -238,6 +263,12 @@ const agent = createAgentControl({
 });
 let agentWalking = false;
 agent.busy = () => agentWalking;
+// Synchronous pose for the episode recorder (agent.pose() is async by contract).
+agent.poseSync = () => {
+  if (!player) return null;
+  const p = player.getAgentPose();
+  return { x: p.position.x, z: p.position.z, headingDeg: quaternionToHeadingDeg(p.rotation) };
+};
 {
   const goto = agent.goto;
   agent.goto = async (args) => {
@@ -250,20 +281,66 @@ agent.busy = () => agentWalking;
   };
 }
 
+// Jun's agentControl publishes frames/paths to window.__seekr.agentPanel; we only
+// use the planned-path overlay on the minimap (narration lives in the Talk tab).
+window.__seekr = Object.assign(window.__seekr ?? {}, {
+  agentPanel: { frame() {}, path: (points) => minimap.setPath(points ?? []) },
+});
+
 const talk = createTalk({
   ui,
   agent,
   brainUrl: APP_CONFIG.brainUrl,
   getScene: () => activeScene,
   captureObservation: (trigger) => captureObservation(trigger),
+  getLastFrame: () => lastEgoFrame,
+  locate: (objectId) => { minimap.setSelectedMarker(objectId); pollObjectMarkers(); },
+  markers: () => objectMarkers,
+  locateBbox: (cameraSnapshot, bbox, fallbackM) => {
+    const scale = { metersPerUnit: activeScene?.geometry?.metersPerUnit ?? 1, environmentScale: CONFIG.environment.scale };
+    const r = measureBboxRange({ splatMesh, cameraSnapshot, bbox, ...scale });
+    if (r.point) return { position: r.point, distanceM: r.distanceM, method: r.method, confidence: 0.7 };
+    const d = Number.isFinite(fallbackM) ? fallbackM : 2;
+    return { position: approximateBboxPoint({ cameraSnapshot, bbox, distanceM: d }), distanceM: d,
+             method: "image-center-approx", confidence: 0.2 };
+  },
 });
 ui.onSubmit((text) => talk.handle(text));
+
+// Replay Demo (presentation): guided replay of a saved route with cached narration.
+const replay = createReplay({
+  ui,
+  agent,
+  getScene: () => activeScene,
+  loadScene: (id) => loadSceneById(id),
+  isBusy: () => agentWalking || talk.exploring,
+  onStateChange: (on) => ui.setReplayActive(on),
+});
+ui.onReplay({ start: () => replay.start(), stop: () => replay.stop() });
+
+// Recorded Replay of the last real "find" episode (conversational: "give me a replay").
+const baseWalk = CONFIG.player.thirdPerson.walkSpeed;
+const episodeReplay = createEpisodeReplay({
+  ui,
+  agent,
+  getScene: () => activeScene,
+  loadScene: (id) => loadSceneById(id),
+  isBusy: () => agentWalking || talk.exploring || replay.active,
+  onState: (st) => ui.setEpisodeControls(st),
+  setSpeed: (s) => player?.setTuning({ walkSpeed: baseWalk * s, runSpeed: CONFIG.player.thirdPerson.runSpeed * s }),
+});
+window.__seekr = Object.assign(window.__seekr ?? {}, { episodeReplay });
+ui.onEpisodeControls({
+  play: () => episodeReplay.start(), stop: () => episodeReplay.stop(),
+  pause: () => episodeReplay.pause(), resume: () => episodeReplay.resume(),
+  mute: () => episodeReplay.toggleMute(), speed: (s) => episodeReplay.setPlaybackSpeed(s),
+});
 
 // Real user WASD takes control back from a walk in progress (isTrusted: only
 // genuine input can do this), exactly as "stop" would.
 window.addEventListener("keydown", (event) => {
-  if (!agentWalking || !event.isTrusted || isTyping()) return;
-  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) talk.stop();
+  if ((!agentWalking && !replay.active && !episodeReplay.active) || !event.isTrusted || isTyping()) return;
+  if (["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) { if (!episodeReplay.stop() && !replay.stop()) talk.stop(); }
 });
 
 // ---------------------------------------------------------------------------
@@ -1435,6 +1512,11 @@ Object.defineProperties(window.__seekr, Object.getOwnPropertyDescriptors({ // (d
   cognitiveMap,
   agent,
   talk,
+  replay,
+  get objectMarkers() {
+    return objectMarkers;
+  },
+  minimap, // debug/test: markerAt(clientX, clientY), setSelectedMarker(id)
   get player() {
     return player;
   },

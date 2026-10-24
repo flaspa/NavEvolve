@@ -1,3 +1,5 @@
+// REUSED from teammate Jun Jiang's NavEvolve branch origin/explore-local (commit 4f50823), verbatim except the NavEvolve-marked line.
+
 /**
  * agentControl.js — the browser half of the brain's Body: capture / goto / turn /
  * face / pose / frontiers / reset (docs/CONTRACTS.md §1). Walking is driven by
@@ -108,6 +110,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
     job = null;
     player.clearExternalMove();
     player.setInputEnabled(j.inputWas);
+    window.__seekr?.agentPanel?.path?.([]); // NavEvolve: clear the planned path
     j.resolve({ status, pose: pose(), pathLength: r3(j.length), path: j.path.map(([x, z]) => [r3(x), r3(z)]) });
   }
 
@@ -181,6 +184,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
           frameId: obsId ?? `${f.sceneId}-${f.timestamp}-${i}`, obsId, sceneId: f.sceneId,
           jpegDataUrl: f.dataUrl, pose: { ...o },
           camera: { fovDeg: cam.fov, aspect: cam.aspect, near: cam.near, far: cam.far },
+          cameraSnapshot: cam, // NavEvolve: exact capture camera for bbox grounding (egoRange.js)
           rangeM: range?.distanceM ?? null, ts: new Date(f.timestamp).toISOString(),
         });
         window.__seekr?.agentPanel?.frame(frames.at(-1)); // thumbnails for thoughts
@@ -203,6 +207,7 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
       const path = smooth(g, cells).slice(1);
       if (isWalk(g, ...cellOf(g, x, z))) path.push([x, z]); // exact target replaces the goal cell centre
       else if (!path.length) path.push(cellCentre(g, ...goal)); // already standing in the snapped cell
+      window.__seekr?.agentPanel?.path?.([[here.x, here.z], ...path]); // NavEvolve: minimap overlay
       let length = 0, px = here.x, pz = here.z;
       for (const [wx, wz] of path) { length += Math.hypot(wx - px, wz - pz); px = wx; pz = wz; }
       return new Promise((resolve) => {

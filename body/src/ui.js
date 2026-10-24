@@ -68,6 +68,11 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
       <div class="hud-pos hud-cam" data-role="camera-pos"></div>
       <div class="hud-pos" data-role="captures">Observations: —</div>
       <a class="hud-link" href="${APP_CONFIG.brainUrl}/gallery" target="_blank" rel="noopener">Observation Gallery ↗</a>
+      <div class="hud-replay" data-role="replay">
+        <button type="button" data-role="replay-start" title="Guided replay of a saved route with cached narration">▶ Replay Demo</button>
+        <button type="button" data-role="replay-stop" hidden>■ Stop Replay</button>
+        <span class="hud-replay-badge" data-role="replay-badge" hidden>REPLAY DEMO</span>
+      </div>
       <div class="hud-view">
         <button type="button" data-mode="first">1st Person</button>
         <button type="button" data-mode="third">3rd Person</button>
@@ -96,6 +101,9 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
   const cameraPosEl = root.querySelector('[data-role="camera-pos"]');
   const helpEl = root.querySelector('[data-role="help"]');
   const capturesEl = root.querySelector('[data-role="captures"]');
+  const replayStartBtn = root.querySelector('[data-role="replay-start"]');
+  const replayStopBtn = root.querySelector('[data-role="replay-stop"]');
+  const replayBadge = root.querySelector('[data-role="replay-badge"]');
   const viewButtons = [...root.querySelectorAll(".hud-view button")];
 
   let viewChangeHandler = null;
@@ -138,6 +146,14 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
           <button type="button" class="chat-copy" data-role="clear-chat"
                   title="Clear the chat transcript shown here. Navigation, the active goal and brain state are not affected.">Clear chat</button>
           <span class="chat-copy-note" data-role="copy-chat-note" aria-live="polite"></span>
+        </div>
+        <div class="replay-bar" data-role="replay-bar" hidden>
+          <span class="replay-bar-label">RECORDED REPLAY</span>
+          <button type="button" data-role="ep-play">▶ Play</button>
+          <button type="button" data-role="ep-pause">⏸ Pause</button>
+          <button type="button" data-role="ep-stop">■ Stop</button>
+          <button type="button" data-role="ep-mute">🔊</button>
+          <button type="button" data-role="ep-speed">1×</button>
         </div>
         <div class="chat-log" data-role="log"></div>
         <form class="chat-row" data-role="form">
@@ -807,6 +823,44 @@ export function createUI({ title = "Spark WebXR Research" } = {}) {
     /** Active camera world position, labelled by camera mode. */
     setCameraPosition(mode, x, y, z) {
       cameraPosEl.textContent = formatCameraPosition(mode, x, y, z);
+    },
+
+    /** Recorded Replay playback bar (Talk tab). */
+    onEpisodeControls({ play, stop, pause, resume, mute, speed }) {
+      const bar = sidebar.querySelector('[data-role="replay-bar"]');
+      bar.hidden = false;
+      const q = (r) => sidebar.querySelector(`[data-role="${r}"]`);
+      let playing = false, paused = false, spd = 1;
+      q("ep-play").addEventListener("click", () => { showTab("chat"); play(); });
+      q("ep-stop").addEventListener("click", () => stop());
+      q("ep-pause").addEventListener("click", () => (paused ? resume() : pause()));
+      q("ep-mute").addEventListener("click", () => mute());
+      q("ep-speed").addEventListener("click", () => { spd = spd === 1 ? 1.5 : 1; speed(spd); });
+      this.setEpisodeControls = ({ active, paused: p, muted, speed: s }) => {
+        playing = active; paused = p;
+        q("ep-play").textContent = active ? "▶ Playing…" : "↻ Replay Again";
+        q("ep-play").disabled = active;
+        q("ep-pause").disabled = !active;
+        q("ep-pause").textContent = p ? "▶ Resume" : "⏸ Pause";
+        q("ep-stop").disabled = !active;
+        q("ep-mute").textContent = muted ? "🔇" : "🔊";
+        q("ep-speed").textContent = `${s}×`;
+      };
+      this.setEpisodeControls({ active: false, paused: false, muted: false, speed: 1 });
+    },
+    setEpisodeControls() {},
+
+    /** Replay Demo controls: handlers + active state (button labels switch to "Replay Again"). */
+    onReplay({ start, stop }) {
+      replayStartBtn.addEventListener("click", (e) => { e.stopPropagation(); start(); });
+      replayStopBtn.addEventListener("click", (e) => { e.stopPropagation(); stop(); });
+    },
+    setReplayActive(active) {
+      replayStopBtn.hidden = !active;
+      replayBadge.hidden = !active;
+      replayStartBtn.disabled = active;
+      if (!active && replayStartBtn.dataset.played) replayStartBtn.textContent = "↻ Replay Again";
+      if (active) replayStartBtn.dataset.played = "1";
     },
 
     /** Observation counter line (captures this session / stored in MongoDB). */
