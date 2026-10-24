@@ -41,3 +41,4 @@ Thumbs.db
 
 # Legacy Seekr brain cache
 brain/.memories_collection
+.dev/

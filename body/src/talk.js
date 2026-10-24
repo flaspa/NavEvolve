@@ -239,6 +239,14 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       (hits.length > 1 ? ` (${hits.length} matching memories.)` : ""));
   }
 
+  /** Hand the goal to the brain's agent (recall → navigate → explore); its thoughts stream back into this tab. */
+  function brainNavigate(query) {
+    const send = window.__seekr?.sendAgentEvent;
+    if (!send) return reply("The agent link isn't connected — is the backend running?");
+    agent.halt(); // the brain cancels its old task, but a walk it started would keep going
+    send({ event: "goal", text: query, sceneId: getScene()?.id });
+  }
+
   async function navigateTo(query, { silentMiss = false } = {}) {
     if (agent.busy?.()) { reply("I'm already moving — say \"stop\" first."); return "busy"; }
     const { hits, loose, head } = searchLoose(await memories(), query);
@@ -654,6 +662,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
     currentGoal = null;
     exploring = false; // cancels the exploration loop at its next check
     taskGen += 1;      // any in-flight step of the old task throws Cancelled when it resumes
+    window.__seekr?.sendAgentEvent?.({ event: "stop" });
     agent.halt();      // stops the walk now and restores manual input
     window.__seekr?.agentPanel?.path?.([]);
     reply(wasMoving ? "Stopped. Manual control restored; observations already saved are kept." : "Nothing to stop.");
@@ -697,7 +706,7 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       if (intent === "list_places") await listPlaces();
       else if (intent === "explore") await exploreArea(mode);
       else if (intent === "find") await findObject(target);
-      else if (intent === "navigate") await navigateTo(target);
+      else if (intent === "navigate") brainNavigate(target);
       else if (intent === "have_seen") await haveSeen(target);
       else if (intent === "near") await nearObjects(target);
       else if (intent === "place_objects") await placeObjects(target);

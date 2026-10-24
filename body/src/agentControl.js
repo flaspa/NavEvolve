@@ -199,13 +199,14 @@ export function createAgentControl({ getPlayer, getMeshes, captureEgo, measureRa
       const here = player.getAgentPose().position;
       const fail = (status) => ({ status, pose: pose(), pathLength: 0, path: [] });
       if (!g) return fail("unreachable");
-      const [ti, tj] = cellOf(g, x, z);
+      const goal = snapCell(g, x, z, 4); // targets near furniture/walls land off the grid: take the nearest walkable cell within 1 m
       const start = snapCell(g, here.x, here.z);
-      if (!isWalk(g, ti, tj) || !start) return fail("unreachable");
-      const cells = astar(g, start, [ti, tj]);
+      if (!goal || !start) return fail("unreachable");
+      const cells = astar(g, start, goal);
       if (!cells) return fail("unreachable");
       const path = smooth(g, cells).slice(1);
-      path.push([x, z]); // exact target replaces the goal cell centre
+      if (isWalk(g, ...cellOf(g, x, z))) path.push([x, z]); // exact target replaces the goal cell centre
+      else if (!path.length) path.push(cellCentre(g, ...goal)); // already standing in the snapped cell
       window.__seekr?.agentPanel?.path?.([[here.x, here.z], ...path]); // NavEvolve: minimap overlay
       let length = 0, px = here.x, pz = here.z;
       for (const [wx, wz] of path) { length += Math.hypot(wx - px, wz - pz); px = wx; pz = wz; }
