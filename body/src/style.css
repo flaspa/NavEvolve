@@ -1359,11 +1359,6 @@ body {
 }
 
 /* --- agent panel --- */
-.agent-box { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; background: rgba(20,22,28,0.82); font-size: 12px; color: #eee; }
-.agent-row { display: flex; gap: 4px; }
-.agent-row input { flex: 1; min-width: 0; padding: 4px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.4); color: #fff; font-size: 12px; }
-.agent-row button { padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2); background: rgba(74,163,255,0.25); color: #fff; cursor: pointer; font-size: 12px; }
-.agent-thought { font-size: 11px; color: rgba(255,255,255,0.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .agent-obj { display: flex; justify-content: space-between; gap: 6px; padding: 1px 0; }
 .agent-obj span:last-child { color: rgba(255,255,255,0.5); }
 #cognitive-map .cognitive-map-body.has-objs { display: block; overflow-y: auto; padding: 18px 8px 4px; align-items: stretch; color: #eee; }

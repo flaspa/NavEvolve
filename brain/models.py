@@ -1,17 +1,17 @@
-"""Real model clients (Gemini via Woven proxy). Stateless, thread-safe. Never prints secrets."""
+"""Real model clients (Gemini via Google AI Studio, GEMINI_API_KEY). Stateless, thread-safe. Never prints secrets."""
 import base64, json, os, time, urllib.error, urllib.request
 from pathlib import Path
 
 import numpy as np
 
-for f in (Path(__file__).with_name(".env"), Path("/Users/jun.jiang/Projects/spacial-agents/.env")):
-    if f.exists():
-        for line in f.read_text().splitlines():
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
+_env = Path(__file__).with_name(".env")
+if _env.exists():
+    for line in _env.read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip("\"'"))
 
-BASE = "https://wovey-api.woven.tech/gemini/project/arene_1_core_product_development/v1/models"
+BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 EMBED, VLM = "gemini-embedding-2", "gemini-3.8-flash"
 
 DESCRIBE = """Describe this indoor view in detail so that someone could recognise exactly where in the house it was taken from.
@@ -33,9 +33,7 @@ Pick the option most likely to lead to the goal. JSON: {{"choice": <option index
 
 
 def _post(url, body):
-    req = urllib.request.Request(url, json.dumps(body).encode(), {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.environ['AWS_BEARER_TOKEN_BEDROCK']}"})
+    req = urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json", "x-goog-api-key": os.environ["GEMINI_API_KEY"]})
     hangs = 0
     for attempt in range(8):
         try:

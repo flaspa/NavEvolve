@@ -50,7 +50,6 @@ export const AGENT_NAME = "NavEvolve Agent";
 
 export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, say = ui.addMessage }) {
   let busy = false;
-  let currentGoal = null;
   const reply = (text) => say(AGENT_NAME, text);
 
   /** A backend error, distinct from "no memory": says which endpoint failed. */
@@ -127,48 +126,12 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
       (hits.length > 1 ? ` (${hits.length} matching memories.)` : ""));
   }
 
-  async function navigateTo(query) {
-    if (agent.busy?.()) return reply("I'm already moving — say \"stop\" first.");
-    const { hits, loose, head } = searchLoose(await memories(), query);
-    if (!hits.length) return reply(`Not found: I have no memory of "${query}" in this scene, so I can't take you there.`);
-    if (loose) reply(`I have no exact memory of "${query}", but I do remember a "${head}".`);
-
-    // A real viewpoint from which the object was described; skip ones off the NavMesh.
-    const target = hits.find((h) => agent.debug.onNavmesh(h.o.pose.x, h.o.pose.z));
-    if (!target) return reply(`I remember "${query}" but none of those viewpoints is on the walkable surface.`);
-    const o = target.o;
-    currentGoal = query;
-    reply(`I saw "${loose ? head : query}" at ${when(o)} near ${where(o)}. Walking there now…`);
-
-    let result;
-    try {
-      result = await agent.goto({ x: o.pose.x, z: o.pose.z, stopWithin: 0.35 });
-    } catch (err) {
-      currentGoal = null;
-      return reply(`I couldn't start walking — ${err.message}`);
-    }
-    if (currentGoal !== query) return; // stopped or replaced meanwhile
-    if (result.status !== "arrived") {
-      currentGoal = null;
-      return reply(result.status === "unreachable"
-        ? `Unreachable: no NavMesh path from here to ${where(o)}.`
-        : `Blocked: I stopped after ${result.pathLength} m at (${result.pose.x.toFixed(1)}, ${result.pose.z.toFixed(1)}).`);
-    }
-    reply(`Arrived near ${where(o)} after ${result.pathLength} m. Facing the remembered view…`);
-    await agent.turn({ deg: ((o.pose.headingDeg - result.pose.headingDeg + 540) % 360) - 180 });
-
-    const obs = await captureObservation("agent-arrival");
-    currentGoal = null;
-    if (!obs?.id) return reply("Arrived, but I couldn't store a new view to verify against.");
-    try {
-      const v = await getJson("/talk/verify", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ observation_id: obs.id, goal: query }),
-      });
-      reply(v.visible ? `Verified: I can see "${query}" here. ${v.reason}` : `Arrived, but not verified: I don't see "${query}" from here. ${v.reason}`);
-    } catch (err) {
-      reply(`Arrived (verification unavailable: ${err.message}).`);
-    }
+  /** Hand the goal to the brain's agent (recall → navigate → explore); its thoughts stream back into this tab. */
+  function navigateTo(query) {
+    const send = window.__seekr?.sendAgentEvent;
+    if (!send) return reply("The agent link isn't connected — is the backend running?");
+    agent.halt(); // the brain cancels its old task, but a walk it started would keep going
+    send({ event: "goal", text: query, sceneId: getScene()?.id });
   }
 
   async function describeHere() {
@@ -209,8 +172,8 @@ export function createTalk({ ui, agent, brainUrl, getScene, captureObservation, 
 
   function stop() {
     const wasMoving = agent.busy?.();
-    currentGoal = null;
     agent.halt();
+    window.__seekr?.sendAgentEvent?.({ event: "stop" });
     reply(wasMoving ? "Stopped." : "Nothing to stop.");
   }
 
