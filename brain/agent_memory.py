@@ -143,7 +143,11 @@ def search(scene_id: str, query: str, k: int = 3, verify: bool = True) -> list[d
             break
     if verify:
         def check(r):
-            v = models.verify(db.get_observation(r["obs_id"], with_image=True), query)
+            try:
+                v = models.verify(db.get_observation(r["obs_id"], with_image=True), query)
+            except Exception as e:  # one hung gateway call shouldn't sink the other hits
+                r["reason"] = f"verify failed: {type(e).__name__}"
+                return
             r["verified"], r["reason"] = bool(v["visible"]), v.get("reason", "")
         with ThreadPoolExecutor(k) as ex:
             list(ex.map(check, out))

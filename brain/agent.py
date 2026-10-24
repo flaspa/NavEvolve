@@ -20,6 +20,14 @@ async def _timed(fn, *args):
     print(f"[time] {fn.__name__} {time.time() - t:.1f}s -> {out}", flush=True)
     return r
 
+async def _verify(jpeg, goal):
+    """verify, but a gateway that never answers counts as 'not seen' instead of killing the run."""
+    try:
+        return await _timed(models.verify, jpeg, goal)
+    except Exception as e:
+        return {"visible": False, "bbox": None, "reason": f"couldn't check ({type(e).__name__})"}
+
+
 try:  # tests monkeypatch these module attributes
     import models_impl as models
     import agent_memory as memory
@@ -77,10 +85,10 @@ async def find(body, scene_id, goal, max_steps=40, max_seconds=300):
         r = await body.face(pos[0], pos[2])
         await log("face", {"x": pos[0], "z": pos[2]}, r.get("pose"))
         frame = (await body.capture(1))[0]
-        v = await _timed(models.verify, frame["jpeg"], goal)
+        v = await _verify(frame["jpeg"], goal)
         if not v["visible"]:  # position estimates are rough: look around once before giving up here
             frames = await body.capture(4)
-            for f, fv in zip(frames, await asyncio.gather(*(_timed(models.verify, f["jpeg"], goal) for f in frames))):
+            for f, fv in zip(frames, await asyncio.gather(*(_verify(f["jpeg"], goal) for f in frames))):
                 if fv["visible"]:
                     await body.turn((f["pose"]["headingDeg"] - frames[0]["pose"]["headingDeg"] + 180) % 360 - 180)
                     frame, v = f, fv
@@ -98,7 +106,7 @@ async def find(body, scene_id, goal, max_steps=40, max_seconds=300):
         p = await body.pose(); p = p.get("pose", p)
         await body.turn((h["headingDeg"] - p["headingDeg"] + 180) % 360 - 180)
         frame = (await body.capture(1))[0]
-        v = await _timed(models.verify, frame["jpeg"], goal)
+        v = await _verify(frame["jpeg"], goal)
         await log("verify", {"goal": goal}, frame["pose"], f"Found the {goal}: {v.get('reason', '')}" if v["visible"]
                   else f"The {goal} isn't in this view after all.", frame, "found" if v["visible"] else "verify")
         if not v["visible"]:
@@ -106,8 +114,14 @@ async def find(body, scene_id, goal, max_steps=40, max_seconds=300):
         return v["visible"]
 
     async def recall():
-        for h in await _timed(memory.search, scene_id, goal, 3, True):
-            if h.get("verified") and not is_tried(h["position"]):
+        await body.thought("recall", f"Checking memory for: {goal}")
+        try:
+            hits = await _timed(memory.search, scene_id, goal, 3, False)  # no VLM pre-check: navigate/view verify on arrival
+        except Exception as e:  # slow/broken model gateway or DB: explore instead of dying
+            await body.thought("recall", f"Memory lookup failed ({type(e).__name__}) — exploring instead.")
+            return False
+        for h in hits:
+            if not is_tried(h["position"]):
                 p = h["position"]
                 if not ep["steps"]:
                     ep["mode"] = "recall"

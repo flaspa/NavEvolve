@@ -56,3 +56,21 @@ async def test_explore_recall_fail(mem):
     assert b["success"] and b["mode"] == "recall" and len(b["steps"]) < len(a["steps"])
     c = await run(mem, "unicorn", max_steps=25)
     assert not c["success"] and len(c["steps"]) <= 25
+
+
+@pytest.mark.asyncio
+async def test_recall_failure_falls_back_to_explore(mem, monkeypatch):
+    def boom(*a):
+        raise TimeoutError("The read operation timed out")
+    monkeypatch.setattr(mem, "search", boom)
+    a = await run(mem, "lamp")
+    assert a["success"] and a["mode"] == "explore"
+
+
+@pytest.mark.asyncio
+async def test_verify_timeout_does_not_crash(mem, monkeypatch):
+    def hang(*a):
+        raise TimeoutError("The read operation timed out")
+    monkeypatch.setattr(Models, "verify", staticmethod(hang))
+    a = await run(mem, "lamp", max_steps=10)
+    assert not a["success"] and len(a["steps"]) <= 10

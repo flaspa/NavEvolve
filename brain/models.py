@@ -36,14 +36,20 @@ def _post(url, body):
     req = urllib.request.Request(url, json.dumps(body).encode(), {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {os.environ['AWS_BEARER_TOKEN_BEDROCK']}"})
+    hangs = 0
     for attempt in range(8):
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with urllib.request.urlopen(req, timeout=20) as r:  # gateway sometimes hangs; a retry usually answers fast
                 return json.load(r)
         except urllib.error.HTTPError as e:
             if e.code != 429 or attempt == 7:
                 raise
             time.sleep(int(e.headers.get("Retry-After") or 0) or 5 * 2 ** attempt)
+        except (TimeoutError, urllib.error.URLError) as e:
+            hangs += 1
+            if hangs > 2:
+                raise
+            print(f"[models] {url.rsplit('/', 1)[-1]} hung ({e!r}), retry {hangs}/2", flush=True)
 
 
 def _img(jpeg):

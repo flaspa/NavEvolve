@@ -64,3 +64,14 @@ def test_search_and_wipe(mdb):
     assert r and r[0]["verified"] and r[0]["obs_id"] == oid
     memory.wipe(SCENE)
     assert memory.known_objects(SCENE) == [] and memory.search(SCENE, name) == []
+
+
+def test_search_survives_verify_timeout(mdb, monkeypatch):
+    oid = add_obs()
+    asyncio.run(memory.ingest(oid))
+    name = models.list_objects(b"img1")[0]["name"]
+    def hang(*a):
+        raise TimeoutError("The read operation timed out")
+    monkeypatch.setattr(memory.models, "verify", hang)
+    r = memory.search(SCENE, name)
+    assert r and not r[0]["verified"] and "TimeoutError" in r[0]["reason"]
