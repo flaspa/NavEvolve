@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  * Scene Start" with a PUT. Nothing else is writable.
  */
 const HABITAT_DATA_DIR = path.resolve(
-  process.env.SEEKR_HABITAT_DATA_DIR ?? fileURLToPath(new URL("../data", import.meta.url)),
+  process.env.SEEKR_HABITAT_DATA_DIR ?? "C:/Flavia/Data/seekr-world-habitat-gs-validation",
 );
 const LOCAL_WORLDS_DIR = fileURLToPath(new URL("../local-worlds", import.meta.url));
 

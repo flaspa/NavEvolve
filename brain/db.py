@@ -137,7 +137,3 @@ def close() -> None:
     if _client is not None:
         _client.close()
         _client = None
-
-
-def insert_episode(ep: dict) -> str:
-    return str(get_db().episodes.insert_one(ep).inserted_id)

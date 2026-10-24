@@ -8,24 +8,6 @@ Built for the Cerebral Valley Harness Engineering & Model Wrangling Hackathon
 on top of the pre-hackathon Seekr Body. `PROVENANCE.md` lists exactly what was
 reused and what is new.
 
-![NavEvolve demo](docs/media/demo.gif)
-
-▶️ [Watch the demo with sound (MP4)](docs/media/demo.mp4)
-
-## What it does
-
-NavEvolve lets an agent search for objects in a 3D space, mimicking what a
-real robot has to do when told "go find the mug".
-
-1. **Explore.** The agent walks the space and captures what it sees.
-2. **Perceive.** An image model marks the objects in each frame, and an
-   embedding model turns the frame into a vector.
-3. **Remember.** Each observation — objects, embedding and the location where
-   it was seen — is saved as the agent's memory.
-4. **Recall.** After the first exploration, the agent remembers what it has
-   seen and where, so it can go straight to an object instead of searching
-   again.
-
 ## Architecture
 
 | Component | Role | Status |
